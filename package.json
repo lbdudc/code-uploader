@@ -5,11 +5,13 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
+    "sshExample": "node ./examples/SSHExample.js",
+    "awsExample": "node ./examples/AWSExample.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "aws-sdk": "^2.1.12",
-    "dotenv": "^10.0.0"
+    "aws-sdk": "^2.1382.0",
+    "dotenv": "^16.0.3"
   },
   "keywords": [
     "uploader",

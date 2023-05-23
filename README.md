@@ -22,27 +22,33 @@ npm install
 
 More examples can be found in the `./examples` folder.
 
-### SSH
+### SSH (Debian/Ubuntu)
 
 SSH Usage Example
 
 ```js
-import { Uploader, SSHUploadStrategy } from 'code-uploader';
+import { Uploader, DebianUploadStrategy } from 'code-uploader';
 
-// Create the uploader
 const uploader = new Uploader();
+uploader.setUploadStrategy(new DebianUploadStrategy());
 
-// Set the upload strategy
-uploader.setUploadStrategy(new SSHUploadStrategy());
+const config = {
+    host: '127.0.0.1',
+    port: 22,
+    username: 'root',
+    certRoute: '/home/certs/id_rsa', // Optional but recommended
+    repoPath: 'code/lps/output',
+    remoteRepoPath: '/home/username/code',
+};
 
-// Upload the code
-const uploadRes = await uploader.uploadCode({
-    host: '',
-    username: '',
-    password: '',
-    repoDirectory: '',
-    remoteRepoPath: '',
-});
+// Upload code by SCP
+await uploader.uploadCode(config);
+
+// Install Docker and docker-compose 
+await uploader.configureInstance(config);
+
+// Run docker-compose up
+await uploader.runDockerComposeUp(config);
 
 // Example of executing a command on the server
 await uploader.executeCommand(`ssh -o StrictHostKeyChecking=no ${username}@${host} "sudo ls -la /home/${username}/code"`);
