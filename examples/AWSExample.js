@@ -29,12 +29,21 @@ await uploader.uploadCode({
     REMOTE_REPO_PATH: `/home/${process.env.AWS_USERNAME || 'ec2-user'}/code`,
 });
 
-// Configure AWS instance installing docker, nginx, docker-compose and running the docker-compose file
+// Configure AWS instance installing docker, nginx, docker-compose
 await uploader.configureInstance({
     publicIp: res.publicIp,
     AWS_USERNAME: process.env.AWS_USERNAME || 'ec2-user',
+    AWS_REGION: process.env.AWS_REGION || 'eu-west-2',
     AWS_SSH_PRIVATE_KEY_PATH: process.env.AWS_SSH_PRIVATE_KEY_PATH || './my-key-pair.pem',
 })
 
-// Example of executing a command on the AWS instance
-await uploader.executeCommand(`ssh -o StrictHostKeyChecking=no -i ${AWS_SSH_PRIVATE_KEY_PATH} ${AWS_USERNAME}@${publicIp} "sudo ls -la /home/${AWS_USERNAME}/code"`);
+// Run docker-compose up on AWS instance
+await uploader.runDockerComposeUp({
+    publicIp: res.publicIp,
+    AWS_USERNAME: process.env.AWS_USERNAME || 'ec2-user',
+    AWS_REGION: process.env.AWS_REGION || 'eu-west-2',
+    AWS_SSH_PRIVATE_KEY_PATH: process.env.AWS_SSH_PRIVATE_KEY_PATH || './my-key-pair.pem',
+})
+
+// // Example of executing a command on the AWS instance
+// await uploader.executeCommand(`ssh -o StrictHostKeyChecking=no -i ${AWS_SSH_PRIVATE_KEY_PATH} ${AWS_USERNAME}@${publicIp} "sudo ls -la /home/${AWS_USERNAME}/code"`);
