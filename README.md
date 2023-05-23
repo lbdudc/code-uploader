@@ -18,6 +18,10 @@ Execute the following command:
 npm install
 ```
 
+## Known Issues :warning:
+
+In AWS instances, the docker-compose up command fails with the basic EC2 free tier instance. This is because the instance does not have enough memory to run the docker-compose up command. To solve this, you can use a bigger instance
+
 ## Example Usages
 
 More examples can be found in the `./examples` folder.
@@ -93,6 +97,15 @@ const uploadRes = await uploader.uploadCode({
 await uploader.configureInstance({
     publicIp: res.publicIp,
     AWS_USERNAME: process.env.AWS_USERNAME || 'ec2-user',
+    AWS_SSH_PRIVATE_KEY_PATH: process.env.AWS_SSH_PRIVATE_KEY_PATH || './my-key-pair.pem',
+    AWS_REGION: process.env.AWS_REGION || 'eu-west-3',
+})
+
+// Run docker-compose up on AWS instance
+await uploader.runDockerComposeUp({
+    publicIp: res.publicIp,
+    AWS_USERNAME: process.env.AWS_USERNAME || 'ec2-user',
+    AWS_REGION: process.env.AWS_REGION || 'eu-west-2',
     AWS_SSH_PRIVATE_KEY_PATH: process.env.AWS_SSH_PRIVATE_KEY_PATH || './my-key-pair.pem',
 })
 

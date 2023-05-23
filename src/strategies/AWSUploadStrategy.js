@@ -1,10 +1,8 @@
 import UploadStrategy from "./UploadStrategy.js";
 import { executeCommand } from '../utils/utils.js';
-import pkg from 'aws-sdk';
-const { EC2 } = pkg;
+import { EC2Client, RunInstancesCommand, waitUntilInstanceRunning, StartInstancesCommand, DescribeInstancesCommand } from "@aws-sdk/client-ec2";
 
 class AWSUploadStrategy extends UploadStrategy {
-
 
     /**
      * Creates an AWS instance with the specified configuration
@@ -16,54 +14,51 @@ class AWSUploadStrategy extends UploadStrategy {
         const { AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION } = config;
         const { AWS_INSTANCE_NAME, AWS_INSTANCE_TYPE, AWS_AMI_ID, AWS_KEY_NAME, AWS_SECURITY_GROUP_ID } = config;
 
-        const ec2 = new EC2({
-            accessKeyId: AWS_ACCESS_KEY_ID,
-            secretAccessKey: AWS_SECRET_ACCESS_KEY,
-            region: AWS_REGION,
-        });
+        const client = new EC2Client(
+            {
+                region: AWS_REGION,
+                credentials: {
+                    accessKeyId: AWS_ACCESS_KEY_ID,
+                    secretAccessKey: AWS_SECRET_ACCESS_KEY
+                }
+            }
+        );
 
-        const instanceParams = {
+        const input = {
             ImageId: AWS_AMI_ID,
             InstanceType: AWS_INSTANCE_TYPE,
             KeyName: AWS_KEY_NAME,
-            SecurityGroupIds: [AWS_SECURITY_GROUP_ID],
-            MinCount: 1,
             MaxCount: 1,
-            TagSpecifications: [{
-                ResourceType: 'instance',
-                Tags: [{
-                    Key: 'Name',
-                    Value: AWS_INSTANCE_NAME,
-                }],
-            }],
+            MinCount: 1,
+            Monitoring: {
+                Enabled: true,
+            },
+            SecurityGroupIds: [AWS_SECURITY_GROUP_ID],
+            TagSpecifications: [
+                {
+                    ResourceType: "instance",
+                    Tags: [
+                        {
+                            Key: "Name",
+                            Value: AWS_INSTANCE_NAME,
+                        },
+                    ],
+                },
+            ],
         };
 
-        return new Promise((resolve, reject) => {
-            ec2.runInstances(instanceParams, (err, data) => {
-                if (err) {
-                    console.error(err);
-                    reject(err);
-                }
+        try {
+            const { PublicIpAddress, InstanceId } = await this._startInstance(input, client);
 
-                const instanceId = data.Instances[0].InstanceId;
-                console.log(`Waiting for instance ${instanceId} to start up...`);
+            console.log(`Instance ${InstanceId} is now running with public IP ${PublicIpAddress}`);
 
-                ec2.waitFor('instanceRunning', { InstanceIds: [instanceId] }, async (err, data) => {
-                    if (err) {
-                        console.error(err);
-                        reject(err);
-                    }
-
-                    const publicIp = data.Reservations[0].Instances[0].PublicIpAddress;
-                    console.log(`Instance ${instanceId} is now running with public IP ${publicIp}`);
-
-                    resolve({
-                        instanceId,
-                        publicIp,
-                    });
-                });
-            });
-        });
+            return {
+                instanceId: InstanceId,
+                publicIp: PublicIpAddress,
+            };
+        } catch (err) {
+            console.error(err);
+        }
     }
 
     /**
@@ -89,29 +84,91 @@ class AWSUploadStrategy extends UploadStrategy {
      * 
      * @returns {Promise<void>}
      */
-    async configureInstance({ publicIp, ...config }) {
-
-        const { AWS_SSH_PRIVATE_KEY_PATH, AWS_USERNAME } = config;
+    async configureInstance(config) {
 
         // Connect to instance and install Docker
         console.log('Connecting to instance and installing Docker...');
-        command = `ssh -o StrictHostKeyChecking=no -i ${AWS_SSH_PRIVATE_KEY_PATH} ${AWS_USERNAME}@${publicIp} "sudo yum update -y && sudo yum install -y docker && sudo service docker start"`;
-        await executeCommand(command)
-
-        // Install and run nginx
-        console.log('Connecting to instance and installing nginx...')
-        command = `ssh -o StrictHostKeyChecking=no -i ${AWS_SSH_PRIVATE_KEY_PATH} ${AWS_USERNAME}@${publicIp} "sudo amazon-linux-extras enable nginx1 && sudo yum -y install nginx && sudo service nginx start"`
-        await executeCommand(command)
-
-        // Copy configuration files to nginx
-        console.log('Connecting to instance and copying nginx configuration files (overriding it)...')
-        command = `ssh -o StrictHostKeyChecking=no -i ${AWS_SSH_PRIVATE_KEY_PATH} ${AWS_USERNAME}@${publicIp} "sudo cp /home/${AWS_USERNAME}/code/nginx.conf /etc/nginx/nginx.conf && sudo service nginx restart"`
+        let command = this._getSSHCredentials(config) + '\"sudo yum update -y && sudo yum install -y docker && sudo service docker start\"';
         await executeCommand(command)
 
         // Install docker-compose
         console.log('Connecting to instance and installing docker-compose...')
-        command = `ssh -o StrictHostKeyChecking=no -i ${AWS_SSH_PRIVATE_KEY_PATH} ${AWS_USERNAME}@${publicIp} "sudo curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s | tr \'[:upper:]\' \'[:lower:]\')-$(uname -m) -o /usr/bin/docker-compose && sudo chmod 755 /usr/bin/docker-compose && docker-compose --version"`
+        command = this._getSSHCredentials(config) + '\"sudo curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s | tr \'[:upper:]\' \'[:lower:]\')-$(uname -m) -o /usr/bin/docker-compose && sudo chmod 755 /usr/bin/docker-compose && docker-compose --version\"';
         await executeCommand(command)
+    }
+
+    /**
+     * Runs docker-compose up on the AWS instance
+     * @param {String} publicIp Public IP of the AWS instance
+     * @param {Object} config Configuration object
+     */
+    async runDockerComposeUp(config) {
+
+        const { AWS_USERNAME } = config;
+        // Run docker-compose up
+        console.log('Connecting to instance and running docker-compose up...')
+        const command = this._getSSHCredentials(config) + `\"cd /home/${AWS_USERNAME}/code/deploy && sudo docker-compose up -d\"`;
+        await executeCommand(command)
+    }
+
+    /**
+     * Formats the SSH credentials to connect to the AWS instance
+     * @param {Object} config 
+     * @returns {String} Formatted SSH credentials
+     */
+    _getSSHCredentials(config) {
+        const { publicIp, AWS_SSH_PRIVATE_KEY_PATH, AWS_USERNAME, AWS_REGION } = config;
+        //ssh -o StrictHostKeyChecking=no -i .\mykey.pem ec2-user@ec2-13-41-81-214.eu-west-2.compute.amazonaws.com
+        const formattedIp = publicIp.replace(/\./g, '-');
+        return `ssh -o StrictHostKeyChecking=no -i ${AWS_SSH_PRIVATE_KEY_PATH} ${AWS_USERNAME}@ec2-${formattedIp}.${AWS_REGION}.compute.amazonaws.com `;
+    }
+
+    /**
+     * Starts an AWS instance
+     * @param {Object} input Input object for the RunInstancesCommand
+     * @param {EC2Client} client EC2Client
+     * @returns {Promise<Object>} Object containing the instance ID and public IP of the AWS instance
+     */
+    async _startInstance(input, client) {
+
+        const command = new RunInstancesCommand(input);
+        const data = await client.send(command);
+        const instanceId = data.Instances[0].InstanceId;
+
+        const startCommand = new StartInstancesCommand({ InstanceIds: [instanceId] });
+        await client.send(startCommand);
+
+        console.log(`Waiting for instance ${instanceId} to start up...`);
+
+        // Await for instance to start up
+        await waitUntilInstanceRunning(
+            { client: client },
+            { InstanceIds: [instanceId] }
+        );
+
+        console.log(`Instance ${instanceId} is now running`);
+
+        const res = await this._describeInstance(instanceId, client);
+        return {
+            ...res,
+            InstanceId: instanceId,
+        }
+    }
+
+    /**
+     * Describes an AWS instance
+     * @param {String} instanceId 
+     * @param {EC2Client} client 
+     * @returns {Promise<Object>} Object containing the instance ID and public IP of the AWS instance
+     */
+    async _describeInstance(instanceId, client) {
+
+        const command = new DescribeInstancesCommand({
+            InstanceIds: [instanceId],
+        })
+
+        const { Reservations } = await client.send(command);
+        return Reservations[0].Instances[0];
     }
 }
 
