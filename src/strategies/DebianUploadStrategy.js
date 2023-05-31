@@ -54,7 +54,11 @@ class BasicSSHUploadStrategy extends UploadStrategy {
 
         // Add Docker repository
         console.log('Connecting to instance and adding Docker\'s repository...');
-        command = this._getShhCommand(config) + ` "echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list"`;
+        command = this._getShhCommand(config) + ` 'echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list'`;
+        await executeCommand(command);
+
+        console.log('Connecting to instance and adding Docker\'s repository...');
+        command = this._getShhCommand(config) + ` 'echo "curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg"'`;
         await executeCommand(command);
 
         // Install Docker Engine
