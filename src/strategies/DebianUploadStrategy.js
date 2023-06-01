@@ -41,60 +41,52 @@ class BasicSSHUploadStrategy extends UploadStrategy {
 
         let command = '';
 
-        // // ------------ DOCKER CONFIGURATION ------------
-        // Install Docker dependencies
-        console.log('Connecting to instance and installing Docker dependencies...');
-        command = this._getShhCommand(config) + ` "sudo apt update && sudo apt -y install apt-transport-https ca-certificates curl gnupg2 software-properties-common"`;
+        // ------------ DOCKER CONFIGURATION ------------
+        console.log('----- Update existing packages -----');
+        command = this._getShhCommand(config) + " \"sudo apt update\"";
         await executeCommand(command);
-
-        // Add Docker's official GPG key
-        console.log('Connecting to instance and adding Docker\'s official GPG key...');
-        command = this._getShhCommand(config) + ` "curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add -"`;
+        
+        console.log("----- Installing prerequisite packages which let apt use packages over HTTPS: -----")
+        command = this._getShhCommand(config) + " \"sudo apt -y install apt-transport-https ca-certificates curl gnupg2 software-properties-common\"";
         await executeCommand(command);
-
-        // Add Docker repository
-        console.log('Connecting to instance and adding Docker\'s repository...');
-        command = this._getShhCommand(config) + ` 'echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list'`;
+        
+        console.log("----- Adding Docker’s official GPG key: -----")
+        command = this._getShhCommand(config) + " \"curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add -\"";
         await executeCommand(command);
-
-        console.log('Connecting to instance and adding Docker\'s repository...');
-        command = this._getShhCommand(config) + ` 'echo "curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg"'`;
+        
+        console.log("----- Add docker repository to APT sources: -----")
+        command = this._getShhCommand(config) + " \"sudo add-apt-repository \\\"deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable\\\"\"";
         await executeCommand(command);
-
-        // Install Docker Engine
-        console.log('Connecting to instance and installing Docker Engine...');
-        command = this._getShhCommand(config) + ` "apt update && sudo apt -y install docker-ce docker-ce-cli containerd.io"`;
+        
+        console.log('----- Update existing packages -----');
+        command = this._getShhCommand(config) + " \"sudo apt update\"";
         await executeCommand(command);
-
-        // Start and enable Docker service
-        console.log('Connecting to instance and starting Docker service...');
-        command = this._getShhCommand(config) + ` "systemctl enable --now docker"`;
-        await executeCommand(command)
-
-        // Verify Docker installation
-        console.log('Connecting to instance and verifying Docker installation...');
-        command = this._getShhCommand(config) + ` "docker --version"`;
+        
+        console.log("----- Check install from the Docker repo instead of the default Debian repo -----")
+        command = this._getShhCommand(config) + " \"apt-cache policy docker-ce\"";
         await executeCommand(command);
-
-
+        
+        console.log("----- Install Docker: -----")
+        command = this._getShhCommand(config) + " \"sudo apt -y install docker-ce\"";
+        await executeCommand(command);
 
         // ------------ DOCKER-COMPOSE CONFIGURATION ------------
-        console.log('Connecting to instance and installing curl...');
+        console.log('----- Connecting to instance and installing curl...-----');
         command = this._getShhCommand(config) + ` "apt -y install curl wget"`;
         await executeCommand(command)
 
         // Download the latest release of Docker Compose
-        console.log('Connecting to instance and installing docker-compose...');
+        console.log('----- Connecting to instance and installing docker-compose...-----');
         command = this._getShhCommand(config) + ` "curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose"`
         await executeCommand(command);
 
         // Make the Docker Compose binary executable
-        console.log('Connecting to instance and making docker-compose executable...');
+        console.log('----- Connecting to instance and making docker-compose executable...-----');
         command = this._getShhCommand(config) + ` "chmod +x /usr/local/bin/docker-compose"`;
         await executeCommand(command);
 
         // Verify Docker Compose installation
-        console.log('Connecting to instance and verifying docker-compose installation...');
+        console.log('----- Connecting to instance and verifying docker-compose installation...-----');
         command = this._getShhCommand(config) + ` "docker-compose --version"`;
         await executeCommand(command);
     }
@@ -108,7 +100,7 @@ class BasicSSHUploadStrategy extends UploadStrategy {
 
         // Run docker-compose up
         console.log('Connecting to instance and running docker-compose up...')
-        let command = this._getShhCommand(config) + ` "cd ${remoteRepoPath}/deploy && docker-compose up --build -d"`
+        let command = this._getShhCommand(config) + ` "cd ${remoteRepoPath}/deploy && docker-compose up -d"`
         await executeCommand(command)
     }
 
