@@ -55,7 +55,7 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         await executeCommand(command);
         
         console.log("----- Add docker repository to APT sources: -----")
-        command = this._getShhCommand(config) + " \"sudo add-apt-repository \"deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable\"\"";
+        command = this._getShhCommand(config) + " \"sudo add-apt-repository 'deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable'\"";
         await executeCommand(command);
         
         console.log('----- Update existing packages -----');
