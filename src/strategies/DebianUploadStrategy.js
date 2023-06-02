@@ -89,6 +89,11 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         console.log('----- Connecting to instance and verifying docker-compose installation...-----');
         command = this._getShhCommand(config) + ` "docker-compose --version"`;
         await executeCommand(command);
+
+        // Add user to docker group
+        console.log('----- Connecting to instance and adding user to docker group...-----');
+        command = this._getShhCommand(config) + ` "sudo usermod -aG docker ${config.username}"`;
+        await executeCommand(command);
     }
 
     /**
