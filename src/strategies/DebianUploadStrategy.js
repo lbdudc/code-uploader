@@ -63,7 +63,7 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         await executeCommand(command);
         
         console.log("----- Check install from the Docker repo instead of the default Debian repo -----")
-        command = this._getShhCommand(config) + " \"apt-cache policy docker-ce\"";
+        command = this._getShhCommand(config) + " \"sudo apt-cache policy docker-ce\"";
         await executeCommand(command);
         
         console.log("----- Install Docker: -----")
@@ -72,27 +72,27 @@ class BasicSSHUploadStrategy extends UploadStrategy {
 
         // ------------ DOCKER-COMPOSE CONFIGURATION ------------
         console.log('----- Connecting to instance and installing curl...-----');
-        command = this._getShhCommand(config) + ` "apt -y install curl wget"`;
+        command = this._getShhCommand(config) + ` "sudo apt -y install curl wget"`;
         await executeCommand(command)
 
         // Download the latest release of Docker Compose
         console.log('----- Connecting to instance and installing docker-compose...-----');
-        command = this._getShhCommand(config) + ` "curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose"`
+        command = this._getShhCommand(config) + ` "sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose"`
         await executeCommand(command);
 
         // Make the Docker Compose binary executable
         console.log('----- Connecting to instance and making docker-compose executable...-----');
-        command = this._getShhCommand(config) + ` "chmod +x /usr/local/bin/docker-compose"`;
-        await executeCommand(command);
-
-        // Verify Docker Compose installation
-        console.log('----- Connecting to instance and verifying docker-compose installation...-----');
-        command = this._getShhCommand(config) + ` "docker-compose --version"`;
+        command = this._getShhCommand(config) + ` "sudo chmod +x /usr/local/bin/docker-compose"`;
         await executeCommand(command);
 
         // Add user to docker group
         console.log('----- Connecting to instance and adding user to docker group...-----');
         command = this._getShhCommand(config) + ` "sudo usermod -aG docker ${config.username}"`;
+        await executeCommand(command);
+
+        // Verify Docker Compose installation
+        console.log('----- Connecting to instance and verifying docker-compose installation...-----');
+        command = this._getShhCommand(config) + ` "docker-compose --version"`;
         await executeCommand(command);
     }
 
