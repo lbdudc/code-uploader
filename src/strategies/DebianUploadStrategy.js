@@ -1,5 +1,6 @@
 import UploadStrategy from "./UploadStrategy.js";
 import { executeCommand } from '../utils/utils.js';
+import os from 'os';
 
 class BasicSSHUploadStrategy extends UploadStrategy {
 
@@ -41,61 +42,62 @@ class BasicSSHUploadStrategy extends UploadStrategy {
 
         let command = '';
 
+        // Get OS type from node os.type
+        const outterQuot = os.type().toLowerCase().includes('windows') ? '"' : "'";
+        const innerQuot = os.type().toLowerCase().includes('windows') ? "'" : '"';
+
         // ------------ DOCKER CONFIGURATION ------------
         console.log('----- Update existing packages -----');
-        command = this._getShhCommand(config) + " \"sudo apt update\"";
+        command = this._getShhCommand(config) + " " + outterQuot + "sudo apt update" + outterQuot;
         await executeCommand(command);
         
         console.log("----- Installing prerequisite packages which let apt use packages over HTTPS: -----")
-        command = this._getShhCommand(config) + " \"sudo apt -y install apt-transport-https ca-certificates curl gnupg2 software-properties-common\"";
+        command = this._getShhCommand(config) + " " + outterQuot + "sudo apt -y install apt-transport-https ca-certificates curl gnupg2 software-properties-common" + outterQuot;
         await executeCommand(command);
         
         console.log("----- Adding Docker’s official GPG key: -----")
-        command = this._getShhCommand(config) + " \"curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add -\"";
+        command = this._getShhCommand(config) + " " + outterQuot + "curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add -" + outterQuot;
         await executeCommand(command);
         
         console.log("----- Add docker repository to APT sources: -----")
-        if (config.linuxUser) 
-            command = this._getShhCommand(config) + " 'sudo add-apt-repository \"deb [arch=amd64] https://download.docker.com/linux/debian buster stable\"'";
-        else 
-            command = this._getShhCommand(config) + " \"sudo add-apt-repository 'deb [arch=amd64] https://download.docker.com/linux/debian buster stable'\"";
+        command = this._getShhCommand(config) + " " + outterQuot + "sudo add-apt-repository 'deb [arch=amd64] https://download.docker.com/linux/debian buster stable'" + outterQuot;
         await executeCommand(command);
-        
+
         console.log('----- Update existing packages -----');
-        command = this._getShhCommand(config) + " \"sudo apt update\"";
+        command = this._getShhCommand(config) + " " + outterQuot + "sudo apt update" + outterQuot;
         await executeCommand(command);
         
         console.log("----- Check install from the Docker repo instead of the default Debian repo -----")
-        command = this._getShhCommand(config) + " \"sudo apt-cache policy docker-ce\"";
+        command = this._getShhCommand(config) + " " + outterQuot + "apt-cache policy docker-ce" + outterQuot;
         await executeCommand(command);
         
         console.log("----- Install Docker: -----")
-        command = this._getShhCommand(config) + " \"sudo apt -y install docker-ce\"";
+        command = this._getShhCommand(config) + " " + outterQuot + "sudo apt -y install docker-ce" + outterQuot;
         await executeCommand(command);
 
         // ------------ DOCKER-COMPOSE CONFIGURATION ------------
         console.log('----- Connecting to instance and installing curl...-----');
-        command = this._getShhCommand(config) + ` "sudo apt -y install curl wget"`;
+        command = this._getShhCommand(config) + " " + outterQuot + "sudo apt -y install curl" + outterQuot;
         await executeCommand(command)
 
         // Download the latest release of Docker Compose
         console.log('----- Connecting to instance and installing docker-compose...-----');
-        command = this._getShhCommand(config) + ` "sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose"`
+        command = this._getShhCommand(config) + " " + outterQuot + "sudo curl -L " + innerQuot + "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" + innerQuot + " -o /usr/local/bin/docker-compose" + outterQuot;
         await executeCommand(command);
 
         // Make the Docker Compose binary executable
         console.log('----- Connecting to instance and making docker-compose executable...-----');
-        command = this._getShhCommand(config) + ` "sudo chmod +x /usr/local/bin/docker-compose"`;
+        command = this._getShhCommand(config) + " " + outterQuot + "sudo chmod +x /usr/local/bin/docker-compose" + outterQuot;
         await executeCommand(command);
 
         // Add user to docker group
         console.log('----- Connecting to instance and adding user to docker group...-----');
-        command = this._getShhCommand(config) + ` "sudo usermod -aG docker ${config.username}"`;
+        command = this._getShhCommand(config) + " " + outterQuot + `sudo usermod -aG docker ${config.username}` + outterQuot;
         await executeCommand(command);
 
         // Verify Docker Compose installation
         console.log('----- Connecting to instance and verifying docker-compose installation...-----');
-        command = this._getShhCommand(config) + ` "docker-compose --version"`;
+        command = this._getShhCommand(config) + " " + outterQuot + "docker-compose --version" + outterQuot;
         await executeCommand(command);
     }
 
