@@ -4,12 +4,37 @@ import { EC2Client, RunInstancesCommand, waitUntilInstanceRunning, StartInstance
 
 class AWSUploadStrategy extends UploadStrategy {
 
+
+    /**
+    * Uploads the code to the remote machine, sets up the machine, and runs docker-compose up
+    * @param {Object} config Configuration object
+    */
+    async uploadCode(config) {
+
+        // STEP 1 - CREATE INSTANCE
+        console.log('STEP 1/4 - Creating instance...');
+        const { publicIp } = await this._createInstance(config);
+
+        // STEP 2 - SEND CODE
+        console.log('STEP 2/4 - Sending code...');
+        await this._sendCode({ ...config, publicIp });
+
+        // STEP 3 - CONFIGURE INSTANCE
+        console.log('STEP 3/4 - Configuring instance...');
+        await this._configureInstance({ ...config, publicIp });
+
+        // STEP 4 - RUN DOCKER-COMPOSE UP
+        console.log('STEP 4/4 - Running docker-compose up...');
+        await this._runDockerComposeUp({ ...config, publicIp });
+    }
+
+
     /**
      * Creates an AWS instance with the specified configuration
      * @param {Object} config Configuration object
      * @returns {Promise<Object>} Object containing the instance ID and public IP of the AWS instance
      */
-    async createInstance(config) {
+    async _createInstance(config) {
 
         const { AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION } = config;
         const { AWS_INSTANCE_NAME, AWS_INSTANCE_TYPE, AWS_AMI_ID, AWS_KEY_NAME, AWS_SECURITY_GROUP_ID } = config;
@@ -61,15 +86,7 @@ class AWSUploadStrategy extends UploadStrategy {
         }
     }
 
-    /**
-     * Uploads folder containing code files into an AWS instance
-     * @param {String} publicIp Public IP of the AWS instance
-     * @param {Object} config Configuration object
-     * 
-     * @returns {Promise<void>} 
-     */
-    async uploadCode({ publicIp, ...config }) {
-
+    async _sendCode({ publicIp, ...config }) {
         const { AWS_SSH_PRIVATE_KEY_PATH, REPO_DIRECTORY, REMOTE_REPO_PATH, AWS_USERNAME } = config;
 
         console.log('Copying repository to instance...');
@@ -84,7 +101,7 @@ class AWSUploadStrategy extends UploadStrategy {
      * 
      * @returns {Promise<void>}
      */
-    async configureInstance(config) {
+    async _configureInstance(config) {
 
         // Connect to instance and install Docker
         console.log('Connecting to instance and installing Docker...');
@@ -102,7 +119,7 @@ class AWSUploadStrategy extends UploadStrategy {
      * @param {String} publicIp Public IP of the AWS instance
      * @param {Object} config Configuration object
      */
-    async runDockerComposeUp(config) {
+    async _runDockerComposeUp(config) {
 
         const { AWS_USERNAME } = config;
         // Run docker-compose up
