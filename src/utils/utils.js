@@ -1,4 +1,12 @@
 import { spawn } from 'child_process';
+import path from 'path';
+
+export const getAbsolutePath = (folderPath) => {
+    if (path.isAbsolute(folderPath))
+        return folderPath;
+    
+    return path.join(process.cwd(), folderPath);
+};
 
 /**
  * Executes a command in the shell
