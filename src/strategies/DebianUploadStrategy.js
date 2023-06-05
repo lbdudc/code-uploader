@@ -19,7 +19,8 @@ class BasicSSHUploadStrategy extends UploadStrategy {
 
         // STEP 2 - Configure the remote machine
         console.log('STEP 2/3 - Configuring machine...');
-        if (this._checkIfMachineIsConfigured(config)) {
+        const isMachineConfigured = await this._checkIfMachineIsConfigured(config);
+        if (isMachineConfigured) {
             console.log('Machine already configured!');
         } else {
             console.log('Configuring machine...');
@@ -93,14 +94,14 @@ class BasicSSHUploadStrategy extends UploadStrategy {
     async _checkIfMachineIsConfigured(config) {
 
         // Check if docker is installed
-        let command = this._getShhCommand(config) + ' "if [ ! -x "$(command -v docker)" ]; then echo 0; else echo 1; fi"';
+        let command = this._getShhCommand(config) + ' "dpkg -l | grep docker-ce | wc -l"';
         const dockerInstalled = await executeCommand(command);
 
         // Ckeck if docker-compose is installed
-        command = this._getShhCommand(config) + ' "if [ ! -x "$(command -v docker-compose)" ]; then echo 0; else echo 1; fi"';
+        command = this._getShhCommand(config) + ' "dpkg -l | grep docker-compose | wc -l"';
         const dockerComposeInstalled = await executeCommand(command);
 
-        return dockerInstalled && dockerComposeInstalled;
+        return dockerInstalled !== '0' && dockerComposeInstalled !== '0';
     }
 
     /**
