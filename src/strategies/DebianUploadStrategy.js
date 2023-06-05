@@ -96,12 +96,14 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         // Check if docker is installed
         let command = this._getShhCommand(config) + ' "dpkg -l | grep docker-ce | wc -l"';
         const dockerInstalled = await executeCommand(command);
+        const isDockerInstalled = dockerInstalled.stdout.trim() !== '0';
 
         // Ckeck if docker-compose is installed
         command = this._getShhCommand(config) + ' "dpkg -l | grep docker-compose | wc -l"';
         const dockerComposeInstalled = await executeCommand(command);
+        const isDockerComposeInstalled = dockerComposeInstalled.stdout.trim() !== '0';
 
-        return dockerInstalled !== '0' && dockerComposeInstalled !== '0';
+        return isDockerInstalled && isDockerComposeInstalled;
     }
 
     /**
