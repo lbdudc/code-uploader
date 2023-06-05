@@ -140,7 +140,7 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         await executeCommand(command);
 
         console.log("----- Check install from the Docker repo instead of the default Debian repo -----")
-        command = this._getShhCommand(config) + " " + outterQuot + "apt-cache policy docker-ce" + outterQuot;
+        command = this._getShhCommand(config) + " " + outterQuot + "sudo apt-cache policy docker-ce" + outterQuot;
         await executeCommand(command);
 
         console.log("----- Install Docker: -----")
