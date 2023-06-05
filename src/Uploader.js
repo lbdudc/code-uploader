@@ -13,20 +13,8 @@ class Uploader {
         this._uploadStrategy = uploadStrategy;
     }
 
-    async createInstance(config) {
-        return await this._uploadStrategy.createInstance(config);
-    }
-
     async uploadCode(config) {
         return await this._uploadStrategy.uploadCode(config);
-    }
-
-    async configureInstance(config) {
-        return await this._uploadStrategy.configureInstance(config);
-    }
-
-    async runDockerComposeUp(config) {
-        return await this._uploadStrategy.runDockerComposeUp(config);
     }
 
     async executeCommand(command) {

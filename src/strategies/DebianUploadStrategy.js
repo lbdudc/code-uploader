@@ -13,6 +13,30 @@ class BasicSSHUploadStrategy extends UploadStrategy {
      */
     async uploadCode(config) {
 
+        // STEP 1 - Send the code to the remote machine
+        console.log('STEP 1/3 - Sending code...');
+        await this._sendCode(config);
+
+        // STEP 2 - Configure the remote machine
+        console.log('STEP 2/3 - Configuring machine...');
+        if (this._checkIfMachineIsConfigured(config)) {
+            console.log('Machine already configured!');
+        } else {
+            console.log('Configuring machine...');
+            await this._configureInstance(config);
+        }
+
+        // STEP 3 - Run docker-compose up
+        console.log('STEP 3/3 - Running docker-compose up...');
+        await this._runDockerComposeUp(config);
+    }
+
+    /**
+     * Sends the code to the remote machine
+     * @param {Object} config 
+     * @returns 
+     */
+    async _sendCode(config) {
         const { host, username, port, certRoute, repoPath, remoteRepoPath } = config;
 
         // Zip the code
@@ -31,11 +55,10 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         // Upload the code to the remote machine
         console.log('---- Uploading code to local instance...');
         command = '';
-
         command += `scp -P ${port}`
         command += certRoute ? ` -i ${certRoute}` : '';
         command += ` ${zipPath} ${username}@${host}:${remoteRepoPath}`;
-        
+
         try {
             await executeCommand(command);
             console.log('Code uploaded successfully!');
@@ -58,14 +81,32 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         command = this._getShhCommand(config) + ` "rm ${remoteRepoPath}/${repoPath}.zip"`;
         await executeCommand(command);
         // From local machine
-        rm(zipPath, () =>{});
+        rm(zipPath, () => { });
+    }
+
+    /**
+     * Checks if the machine is already configured with Docker and docker-compose
+     * @param {Object} config 
+     * @returns {Boolean} True if the machine is already configured, false otherwise
+     */
+    async _checkIfMachineIsConfigured(config) {
+
+        // Check if docker is installed
+        let command = this._getShhCommand(config) + ' "if [ ! -x "$(command -v docker)" ]; then echo 0; else echo 1; fi"';
+        const dockerInstalled = await executeCommand(command);
+
+        // Ckeck if docker-compose is installed
+        command = this._getShhCommand(config) + ' "if [ ! -x "$(command -v docker-compose)" ]; then echo 0; else echo 1; fi"';
+        const dockerComposeInstalled = await executeCommand(command);
+
+        return dockerInstalled && dockerComposeInstalled;
     }
 
     /**
      * Configures a machine by installing Docker, docker-compose
      * @param {Object} config Configuration object containing the host and username of the machine
      */
-    async configureInstance(config) {
+    async _configureInstance(config) {
 
         let command = '';
 
@@ -77,15 +118,15 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         console.log('----- Update existing packages -----');
         command = this._getShhCommand(config) + " " + outterQuot + "sudo apt update" + outterQuot;
         await executeCommand(command);
-        
+
         console.log("----- Installing prerequisite packages which let apt use packages over HTTPS: -----")
         command = this._getShhCommand(config) + " " + outterQuot + "sudo apt -y install apt-transport-https ca-certificates curl gnupg2 software-properties-common" + outterQuot;
         await executeCommand(command);
-        
+
         console.log("----- Adding Docker’s official GPG key: -----")
         command = this._getShhCommand(config) + " " + outterQuot + "curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add -" + outterQuot;
         await executeCommand(command);
-        
+
         console.log("----- Add docker repository to APT sources: -----")
         command = this._getShhCommand(config) + " " + outterQuot + "sudo add-apt-repository 'deb [arch=amd64] https://download.docker.com/linux/debian buster stable'" + outterQuot;
         await executeCommand(command);
@@ -93,11 +134,11 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         console.log('----- Update existing packages -----');
         command = this._getShhCommand(config) + " " + outterQuot + "sudo apt update" + outterQuot;
         await executeCommand(command);
-        
+
         console.log("----- Check install from the Docker repo instead of the default Debian repo -----")
         command = this._getShhCommand(config) + " " + outterQuot + "apt-cache policy docker-ce" + outterQuot;
         await executeCommand(command);
-        
+
         console.log("----- Install Docker: -----")
         command = this._getShhCommand(config) + " " + outterQuot + "sudo apt -y install docker-ce" + outterQuot;
         await executeCommand(command);
@@ -132,12 +173,13 @@ class BasicSSHUploadStrategy extends UploadStrategy {
      * Runs docker-compose up on the remote machine
      * @param {Object} config Configuration object containing the host and username of the machine
      */
-    async runDockerComposeUp(config) {
+    async _runDockerComposeUp(config) {
         const { remoteRepoPath } = config;
+        const outterQuot = os.type().toLowerCase().includes('windows') ? '"' : "'";
 
         // Run docker-compose up
         console.log('Connecting to instance and running docker-compose up...')
-        let command = this._getShhCommand(config) + ` "cd ${remoteRepoPath}/deploy && docker-compose up -d"`
+        let command = this._getShhCommand(config) + " " + outterQuot + `cd ${remoteRepoPath}/deploy && docker-compose up --build -d` + outterQuot;
         await executeCommand(command)
     }
 
@@ -149,7 +191,7 @@ class BasicSSHUploadStrategy extends UploadStrategy {
     _getShhCommand(config) {
         const { host, port, username, certRoute } = config;
 
-        let command =  `ssh -o StrictHostKeyChecking=no -p ${port}`;
+        let command = `ssh -o StrictHostKeyChecking=no -p ${port}`;
         command += certRoute ? ` -i ${certRoute}` : '';
         command += ` ${username}@${host}`;
 
