@@ -154,7 +154,7 @@ class BasicSSHUploadStrategy extends UploadStrategy {
 
         // Download the latest release of Docker Compose
         console.log('----- Connecting to instance and installing docker-compose...-----');
-        command = this._getShhCommand(config) + " " + outterQuot + "sudo curl -L " + innerQuot + "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" + innerQuot + " -o /usr/local/bin/docker-compose" + outterQuot;
+        command = this._getShhCommand(config) + " " + outterQuot + "sudo curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-\`uname -s\`-\`uname -m\` -o /usr/local/bin/docker-compose" + outterQuot;
         await executeCommand(command);
 
         // Make the Docker Compose binary executable
