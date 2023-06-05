@@ -43,6 +43,7 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         console.log('---- Zipping code...');
         const absPath = await getAbsolutePath(repoPath);
         const zipPath = absPath + '.zip';
+        const zipName = absPath.split(/\/|\\/).pop() + '.zip';
 
         await compressFolder(absPath, `${zipPath}`);
 
@@ -72,13 +73,13 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         // check if unzip is installed, if not, install it
         command = this._getShhCommand(config) + ' "if [ ! -x "$(command -v unzip)" ]; then sudo apt -y install unzip; fi"';
         await executeCommand(command);
-        command = this._getShhCommand(config) + ` "unzip -o ${remoteRepoPath}/${repoPath}.zip -d ${remoteRepoPath}"`;
+        command = this._getShhCommand(config) + ` "unzip -o ${remoteRepoPath}/${zipName} -d ${remoteRepoPath}"`;
         await executeCommand(command);
 
         // Remove the zip file from the remote machine and the local machine
         console.log('---- Removing zip files...');
         // From remote machine
-        command = this._getShhCommand(config) + ` "rm ${remoteRepoPath}/${repoPath}.zip"`;
+        command = this._getShhCommand(config) + ` "rm ${remoteRepoPath}/${zipName}"`;
         await executeCommand(command);
         // From local machine
         rm(zipPath, () => { });
