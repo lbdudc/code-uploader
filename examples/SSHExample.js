@@ -14,9 +14,3 @@ const config = {
 
 // Upload code by SCP
 await uploader.uploadCode(config);
-
-// Install Docker and docker-compose 
-await uploader.configureInstance(config);
-
-// Run docker-compose up
-await uploader.runDockerComposeUp(config);

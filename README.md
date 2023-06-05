@@ -15,8 +15,19 @@ In the `package.json` file, add the following:
 Execute the following command:
 
 ```bash
+# Optional
+nvm use 
+
 npm install
 ```
+
+## Pre-requisites
+
+- Have installed in your machine:
+  - [Node.js](https://nodejs.org/en/download/)
+  - [SSH](https://www.ssh.com/ssh/command/)
+
+- Must be a root user or have sudo privileges in the server where you want to upload the code
 
 ## Known Issues :warning:
 
@@ -45,17 +56,8 @@ const config = {
     remoteRepoPath: '/home/username/code',
 };
 
-// Upload code by SCP
+// Upload code, configure the instance and run docker-compose up
 await uploader.uploadCode(config);
-
-// Install Docker and docker-compose 
-await uploader.configureInstance(config);
-
-// Run docker-compose up
-await uploader.runDockerComposeUp(config);
-
-// Example of executing a command on the server
-await uploader.executeCommand(`ssh -o StrictHostKeyChecking=no ${username}@${host} "sudo ls -la /home/${username}/code"`);
 ```
 
 ### AWS
@@ -72,8 +74,8 @@ const uploader = new Uploader();
 // Set the upload strategy
 uploader.setUploadStrategy(new AWSUploadStrategy());
 
-// Create the instance (needed for the AWS strategy)
-const res = await uploader.createInstance({
+// Upload the code
+const uploadRes = await uploader.uploadCode({
     AWS_ACCESS_KEY_ID,
     AWS_SECRET_ACCESS_KEY,
     AWS_REGION,
@@ -82,35 +84,11 @@ const res = await uploader.createInstance({
     AWS_INSTANCE_NAME,
     AWS_SECURITY_GROUP_ID,
     AWS_KEY_NAME,
-});
-
-// Upload the code
-const uploadRes = await uploader.uploadCode({
-    publicIp: res.publicIp,
     AWS_USERNAME,
     AWS_SSH_PRIVATE_KEY_PATH,
     REPO_DIRECTORY,
     REMOTE_REPO_PATH: `/home/${AWS_USERNAME}/code`,
 });
-
-// Configure AWS instance installing docker, nginx, docker-compose and running the docker-compose file
-await uploader.configureInstance({
-    publicIp: res.publicIp,
-    AWS_USERNAME: process.env.AWS_USERNAME || 'ec2-user',
-    AWS_SSH_PRIVATE_KEY_PATH: process.env.AWS_SSH_PRIVATE_KEY_PATH || './my-key-pair.pem',
-    AWS_REGION: process.env.AWS_REGION || 'eu-west-3',
-})
-
-// Run docker-compose up on AWS instance
-await uploader.runDockerComposeUp({
-    publicIp: res.publicIp,
-    AWS_USERNAME: process.env.AWS_USERNAME || 'ec2-user',
-    AWS_REGION: process.env.AWS_REGION || 'eu-west-2',
-    AWS_SSH_PRIVATE_KEY_PATH: process.env.AWS_SSH_PRIVATE_KEY_PATH || './my-key-pair.pem',
-})
-
-// Example of executing a command on the AWS instance
-await uploader.executeCommand(`ssh -o StrictHostKeyChecking=no -i ${AWS_SSH_PRIVATE_KEY_PATH} ${AWS_USERNAME}@${publicIp} "sudo ls -la /home/${AWS_USERNAME}/code"`);
 ```
 
 </details>
@@ -119,10 +97,7 @@ await uploader.executeCommand(`ssh -o StrictHostKeyChecking=no -i ${AWS_SSH_PRIV
 
 `uploader.js` exposes the following methods:
 
-- `setUploadStrategy(strategy: UploadStrategy): void`: Sets the upload strategy to use
-- `createInstance(options): Promise<CreateInstanceResponse>`: Creates an instance (needed for the AWS strategy)
-- `uploadCode(options): Promise<UploadCodeResponse>`: Uploads the code to the instance
-- `executeCommand(command: string): Promise<ExecuteCommandResponse>` Executes a command in the shell
+- `uploadCode(options): Promise<UploadCodeResponse>`: Uploads the code, configures the instance and runs docker-compose up
 
 ## AWS Instance Pre-requisites
 
