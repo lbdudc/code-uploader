@@ -1,6 +1,8 @@
 import UploadStrategy from "./UploadStrategy.js";
-import { executeCommand } from '../utils/utils.js';
+import { executeCommand, getAbsolutePath } from '../utils/utils.js';
+import { compressFolder } from '../utils/zipUtils.js';
 import os from 'os';
+import { rm } from "fs";
 
 class BasicSSHUploadStrategy extends UploadStrategy {
 
@@ -13,25 +15,50 @@ class BasicSSHUploadStrategy extends UploadStrategy {
 
         const { host, username, port, certRoute, repoPath, remoteRepoPath } = config;
 
-        console.log('Uploading code to local instance...');
+        // Zip the code
+        console.log('---- Zipping code...');
+        const absPath = await getAbsolutePath(repoPath);
+        const zipPath = absPath + '.zip';
 
-        return new Promise(async (resolve, reject) => {
-            let command = '';
+        await compressFolder(absPath, `${zipPath}`);
 
-            if (certRoute)
-                command = `scp -P ${port} -i ${certRoute} -r ${repoPath} ${username}@${host}:${remoteRepoPath}`;
-            else
-                command = `scp -P ${port} -r ${repoPath} ${username}@${host}:${remoteRepoPath}`;
+        // Check if the folder exists, if not, create it
+        console.log('---- Checking if remote folder exists...');
+        let command = this._getShhCommand(config) + ` "if [ ! -d ${remoteRepoPath} ]; then mkdir ${remoteRepoPath}; fi"`;
+        await executeCommand(command);
 
-            try {
-                await executeCommand(command);
-                resolve();
-            } catch (error) {
-                console.error(error);
-                reject(error);
-            }
-        });
 
+        // Upload the code to the remote machine
+        console.log('---- Uploading code to local instance...');
+        command = '';
+
+        command += `scp -P ${port}`
+        command += certRoute ? ` -i ${certRoute}` : '';
+        command += ` ${zipPath} ${username}@${host}:${remoteRepoPath}`;
+        
+        try {
+            await executeCommand(command);
+            console.log('Code uploaded successfully!');
+        } catch (error) {
+            console.error(error);
+            return;
+        }
+
+        // Unzip the code
+        console.log('---- Unzipping code...');
+        // check if unzip is installed, if not, install it
+        command = this._getShhCommand(config) + ' "if [ ! -x "$(command -v unzip)" ]; then sudo apt -y install unzip; fi"';
+        await executeCommand(command);
+        command = this._getShhCommand(config) + ` "unzip -o ${remoteRepoPath}/${repoPath}.zip -d ${remoteRepoPath}"`;
+        await executeCommand(command);
+
+        // Remove the zip file from the remote machine and the local machine
+        console.log('---- Removing zip files...');
+        // From remote machine
+        command = this._getShhCommand(config) + ` "rm ${remoteRepoPath}/${repoPath}.zip"`;
+        await executeCommand(command);
+        // From local machine
+        rm(zipPath, () =>{});
     }
 
     /**
@@ -122,11 +149,11 @@ class BasicSSHUploadStrategy extends UploadStrategy {
     _getShhCommand(config) {
         const { host, port, username, certRoute } = config;
 
-        if (certRoute) {
-            return `ssh -o StrictHostKeyChecking=no -p ${port} -i ${certRoute} ${username}@${host}`;
-        }
+        let command =  `ssh -o StrictHostKeyChecking=no -p ${port}`;
+        command += certRoute ? ` -i ${certRoute}` : '';
+        command += ` ${username}@${host}`;
 
-        return `ssh -o StrictHostKeyChecking=no -p ${port} ${username}@${host}`;
+        return command;
     }
 }
 
