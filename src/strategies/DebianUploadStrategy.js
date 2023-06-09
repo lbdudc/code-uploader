@@ -2,7 +2,7 @@ import UploadStrategy from "./UploadStrategy.js";
 import { executeCommand, getAbsolutePath } from '../utils/utils.js';
 import { compressFolder } from '../utils/zipUtils.js';
 import os from 'os';
-import { rm } from "fs";
+import fs, { rm } from "fs";
 
 class BasicSSHUploadStrategy extends UploadStrategy {
 
@@ -13,12 +13,16 @@ class BasicSSHUploadStrategy extends UploadStrategy {
      */
     async uploadCode(config) {
 
-        // STEP 1 - Send the code to the remote machine
-        console.log('STEP 1/3 - Sending code...');
+        // STEP 1 - Preparing the code to be sent
+        console.log('STEP 1/4 - Preparing code...');
+        await this._prepareCode(config);
+
+        // STEP 2 - Send the code to the remote machine
+        console.log('STEP 2/4 - Sending code...');
         await this._sendCode(config);
 
-        // STEP 2 - Configure the remote machine
-        console.log('STEP 2/3 - Configuring machine...');
+        // STEP 3 - Configure the remote machine
+        console.log('STEP 3/4 - Configuring machine...');
         const isMachineConfigured = await this._checkIfMachineIsConfigured(config);
         if (isMachineConfigured) {
             console.log('Machine already configured!');
@@ -27,9 +31,67 @@ class BasicSSHUploadStrategy extends UploadStrategy {
             await this._configureInstance(config);
         }
 
-        // STEP 3 - Run docker-compose up
-        console.log('STEP 3/3 - Running docker-compose up...');
+        // STEP 4 - Run docker-compose up
+        console.log('STEP 4/4 - Running docker-compose up...');
         await this._runDockerComposeUp(config);
+    }
+
+    /**
+     * Prepares the code to be sent to the remote machine
+     * @param {Object} config 
+     */
+    async _prepareCode(config) {
+        const { forceBuild } = config;
+
+        // If forceBuild is not true, skip this step
+        if (!!forceBuild) {
+            // Build the client
+            await this._buildClient(config);
+        }
+    }
+
+    async _buildClient(config) {
+
+        const { repoPath } = config;
+
+        // Check if the client has node_modules folder
+        const absPath = await getAbsolutePath(repoPath);
+        const clientPath = absPath + '/client';
+
+        const nodeModulesPath = clientPath + '/node_modules';
+
+        console.log(nodeModulesPath);
+
+        // Get the node version from .nvmrc file
+        const nodeVersion = fs.readFileSync(clientPath + '/.nvmrc', 'utf8').trim();
+
+        // If it doesn't have node_modules folder, install the dependencies
+        if (!fs.existsSync(nodeModulesPath)) {
+            console.log('---- Installing dependencies...');
+            const command = `cd ${clientPath} && nvm install ${nodeVersion} && nvm use ${nodeVersion} && npm install`;
+            try {
+                await executeCommand(command);
+            } catch (error) {
+                console.error(error);
+                return;
+            }
+        } else {
+            console.log('---- Dependencies already installed!');
+        }
+
+        // Build the client
+        console.log('---- Building client...');
+        const command = `cd ${clientPath} && nvm install ${nodeVersion} && nvm use ${nodeVersion} && npm run build`;
+        try {
+            await executeCommand(command);
+        } catch (error) {
+            console.error(error);
+            return;
+        }
+
+        // Remove the node_modules folder
+        console.log('---- Removing node_modules folder...');
+        rm(nodeModulesPath, { recursive: true }, () => { });
     }
 
     /**
