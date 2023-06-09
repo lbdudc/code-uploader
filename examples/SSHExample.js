@@ -10,6 +10,7 @@ const config = {
     certRoute: '../id_rsa', // Optional but recommended
     repoPath: '../code',
     remoteRepoPath: '/home/vboxuser/code',
+    forceBuild: true,
 };
 
 // Upload code by SCP

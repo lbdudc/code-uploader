@@ -54,6 +54,7 @@ const config = {
     certRoute: '/home/certs/id_rsa', // Optional but recommended
     repoPath: 'code/lps/output',
     remoteRepoPath: '/home/username/code',
+    forceBuild: true, // default false
 };
 
 // Upload code, configure the instance and run docker-compose up
