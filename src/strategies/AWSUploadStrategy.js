@@ -13,6 +13,8 @@ class AWSUploadStrategy extends UploadStrategy {
     */
     async uploadCode(config) {
 
+        config.REPO_DIRECTORY = config.REPO_DIRECTORY || config.repoPath;
+
         console.log('STEP 1/5 - Preparing code for upload...');
         await this._prepareCode(config);
 
