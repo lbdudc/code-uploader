@@ -68,7 +68,7 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         // If it doesn't have node_modules folder, install the dependencies
         if (!fs.existsSync(nodeModulesPath)) {
             console.log('---- Installing dependencies...');
-            const command = `cd ${clientPath} && nvm install ${nodeVersion} && nvm use ${nodeVersion} && npm install`;
+            const command = `cd ${clientPath} && npm_config_node_version=${nodeVersion} npm install`;
             try {
                 await executeCommand(command);
             } catch (error) {
@@ -81,7 +81,7 @@ class BasicSSHUploadStrategy extends UploadStrategy {
 
         // Build the client
         console.log('---- Building client...');
-        const command = `cd ${clientPath} && nvm install ${nodeVersion} && nvm use ${nodeVersion} && npm run build`;
+        const command = `cd ${clientPath} && npm_config_node_version=${nodeVersion} npm run build`;
         try {
             await executeCommand(command);
         } catch (error) {
