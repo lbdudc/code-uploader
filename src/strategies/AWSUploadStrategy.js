@@ -60,7 +60,7 @@ class AWSUploadStrategy extends UploadStrategy {
         // If it doesn't have node_modules folder, install the dependencies
         if (!fs.existsSync(nodeModulesPath)) {
             console.log('---- Installing dependencies...');
-            const command = `cd ${clientPath} && node_version=${nodeVersion} npm install`;
+            const command = `cd ${clientPath} && nvm install ${nodeVersion} && nvm use ${nodeVersion} && npm install`;
             try {
                 await executeCommand(command);
             } catch (error) {
@@ -73,7 +73,7 @@ class AWSUploadStrategy extends UploadStrategy {
 
         // Build the client
         console.log('---- Building client...');
-        const command = `cd ${clientPath} && node_version=${nodeVersion} npm run build`;
+        const command = `cd ${clientPath} && nvm use ${nodeVersion} && npm run build`;
         try {
             await executeCommand(command);
         } catch (error) {
@@ -162,6 +162,8 @@ class AWSUploadStrategy extends UploadStrategy {
     async _sendCode({ publicIp, ...config }) {
         const { AWS_SSH_PRIVATE_KEY_PATH, REPO_DIRECTORY, REMOTE_REPO_PATH, AWS_USERNAME } = config;
 
+        const outterQuot = os.type().toLowerCase().includes('windows') ? '"' : "'";
+
         // Zip the code
         console.log('----- Zipping code...');
         const absPath = await getAbsolutePath(REPO_DIRECTORY);
@@ -172,7 +174,7 @@ class AWSUploadStrategy extends UploadStrategy {
 
         // Check if the folder exists, if not, create it
         console.log('----- Checking if remote folder exists...');
-        let command = this._getSSHCredentials({ publicIp, ...config }) + ` "if [ ! -d ${REMOTE_REPO_PATH} ]; then mkdir ${REMOTE_REPO_PATH}; fi"`;
+        let command = this._getSSHCredentials({ publicIp, ...config }) + ` ${outterQuot} if [ ! -d ${REMOTE_REPO_PATH} ]; then mkdir ${REMOTE_REPO_PATH}; fi ${outterQuot}`;
         await executeCommand(command);
 
         // Upload the code to the AWS instance
@@ -183,15 +185,15 @@ class AWSUploadStrategy extends UploadStrategy {
         // Unzip the code
         console.log('----- Unzipping code...');
         // check if unzip is installed, if not, install it
-        command = this._getSSHCredentials({ publicIp, ...config }) + ` "if ! command -v unzip &> /dev/null; then sudo yum install unzip -y; fi"`;
+        command = this._getSSHCredentials({ publicIp, ...config }) + ` ${outterQuot} if ! command -v unzip &> /dev/null; then sudo yum install unzip -y; fi ${outterQuot}`;
         await executeCommand(command);
 
-        command = this._getSSHCredentials({ publicIp, ...config }) + ` "unzip -o ${REMOTE_REPO_PATH}/${zipName} -d ${REMOTE_REPO_PATH}"`;
+        command = this._getSSHCredentials({ publicIp, ...config }) + ` ${outterQuot} unzip -o ${REMOTE_REPO_PATH}/${zipName} -d ${REMOTE_REPO_PATH} ${outterQuot}`;
         await executeCommand(command);
 
         // Remove the zip files from the AWS instance and local machine
         console.log('----- Removing zip files...');
-        command = this._getSSHCredentials({ publicIp, ...config }) + ` "rm ${REMOTE_REPO_PATH}/${zipName}"`;
+        command = this._getSSHCredentials({ publicIp, ...config }) + ` ${outterQuot} rm ${REMOTE_REPO_PATH}/${zipName} ${outterQuot}`;
         await executeCommand(command);
         rm(zipPath, () => { });
     }
@@ -211,12 +213,12 @@ class AWSUploadStrategy extends UploadStrategy {
 
         // Connect to instance and install Docker
         console.log('Connecting to instance and installing Docker...');
-        command = this._getSSHCredentials(config) + " " + outterQuot + 'sudo yum update -y && sudo yum install -y docker && sudo service docker start' + outterQuot;
+        command = this._getSSHCredentials(config) + ` ${outterQuot} sudo yum update -y && sudo yum install -y docker && sudo service docker start ${outterQuot}`;
         await executeCommand(command)
 
         // Install docker-compose
         console.log('Connecting to instance and installing docker-compose...')
-        command = this._getSSHCredentials(config) + " " + outterQuot + 'sudo curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s | tr \'[:upper:]\' \'[:lower:]\')-$(uname -m) -o /usr/bin/docker-compose && sudo chmod 755 /usr/bin/docker-compose && docker-compose --version' + outterQuot;
+        command = this._getSSHCredentials(config) + ` ${outterQuot} sudo curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s | tr \'[:upper:]\' \'[:lower:]\')-$(uname -m) -o /usr/bin/docker-compose && sudo chmod 755 /usr/bin/docker-compose && docker-compose --version ${outterQuot}`;
         await executeCommand(command)
     }
 
@@ -246,7 +248,7 @@ class AWSUploadStrategy extends UploadStrategy {
         const { publicIp, AWS_SSH_PRIVATE_KEY_PATH, AWS_USERNAME, AWS_REGION } = config;
         //ssh -o StrictHostKeyChecking=no -i .\mykey.pem ec2-user@ec2-13-41-81-214.eu-west-2.compute.amazonaws.com
         const formattedIp = publicIp.replace(/\./g, '-');
-        return `ssh -o StrictHostKeyChecking = no - i ${AWS_SSH_PRIVATE_KEY_PATH} ${AWS_USERNAME} @ec2-${formattedIp}.${AWS_REGION}.compute.amazonaws.com `;
+        return `ssh -o StrictHostKeyChecking=no -i ${AWS_SSH_PRIVATE_KEY_PATH} ${AWS_USERNAME}@ec2-${formattedIp}.${AWS_REGION}.compute.amazonaws.com `;
     }
 
     /**
