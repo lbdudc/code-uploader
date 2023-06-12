@@ -92,6 +92,21 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         // Remove the node_modules folder
         console.log('---- Removing node_modules folder...');
         rm(nodeModulesPath, { recursive: true }, () => { });
+
+
+        // Delete the client service from docker-compose.yml
+        console.log('---- Comment client service from docker-compose.yml...');
+        const dockerComposePath = absPath + '/deploy/docker-compose.yml';
+        const dockerCompose = fs.readFileSync(dockerComposePath, 'utf8');
+        try {
+            // Comment all lines of the client service
+            const clientService = dockerCompose.match(/client:\n\s+build:\n\s+context:.*\n\s+dockerfile:.*\n\s+container_name:.*\n\s+networks:\n\s+- local\n\s+volumes:\n\s+-.*\n/g)[0];
+            const newDockerCompose = dockerCompose.replace(clientService, clientService.split('\n').map(line => `# ${line}`).join('\n'));
+            fs.writeFileSync(dockerComposePath, newDockerCompose, 'utf8');
+        } catch (error) {
+            console.log('---- Docker-compose not modified!');
+            return;
+        }
     }
 
     /**
