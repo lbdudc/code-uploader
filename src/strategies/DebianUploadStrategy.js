@@ -2,7 +2,7 @@ import UploadStrategy from "./UploadStrategy.js";
 import { executeCommand, getAbsolutePath } from '../utils/utils.js';
 import { compressFolder } from '../utils/zipUtils.js';
 import os from 'os';
-import fs, { rm } from "fs";
+import fs, { rmSync } from "fs";
 
 class BasicSSHUploadStrategy extends UploadStrategy {
 
@@ -91,7 +91,7 @@ class BasicSSHUploadStrategy extends UploadStrategy {
 
         // Remove the node_modules folder
         console.log('---- Removing node_modules folder...');
-        rm(nodeModulesPath, { recursive: true }, () => { });
+        rmSync(nodeModulesPath, { recursive: true }, () => { });
 
 
         // Delete the client service from docker-compose.yml
@@ -136,7 +136,7 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         console.log('---- Deleting contents of remote folder...');
         command = this._getShhCommand(config) + ` ${outterQuot}if [ -x "$(command -v docker)" ]; then cd ${remoteRepoPath}/deploy && docker-compose down; fi${outterQuot}`;
         await executeCommand(command);
-        
+
         // Delete the contents of the remote folder
         command = this._getShhCommand(config) + ` ${outterQuot}sudo rm -rf ${remoteRepoPath}/*${outterQuot}`;
         await executeCommand(command);
@@ -170,7 +170,7 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         command = this._getShhCommand(config) + ` "rm ${remoteRepoPath}/${zipName}"`;
         await executeCommand(command);
         // From local machine
-        rm(zipPath, () => { });
+        rmSync(zipPath, { recursive: true }, () => { });
     }
 
     /**

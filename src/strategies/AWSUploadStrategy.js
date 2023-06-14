@@ -2,7 +2,7 @@ import UploadStrategy from "./UploadStrategy.js";
 import { executeCommand, getAbsolutePath } from '../utils/utils.js';
 import { compressFolder } from '../utils/zipUtils.js';
 import { EC2Client, RunInstancesCommand, waitUntilInstanceRunning, StartInstancesCommand, DescribeInstancesCommand } from "@aws-sdk/client-ec2";
-import fs, { rm } from 'fs';
+import fs, { rmSync } from 'fs';
 import os from 'os';
 
 class AWSUploadStrategy extends UploadStrategy {
@@ -197,7 +197,7 @@ class AWSUploadStrategy extends UploadStrategy {
         console.log('----- Removing zip files...');
         command = this._getSSHCredentials({ publicIp, ...config }) + ` ${outterQuot} rm ${REMOTE_REPO_PATH}/${zipName} ${outterQuot}`;
         await executeCommand(command);
-        rm(zipPath, () => { });
+        rmSync(zipPath, () => { });
     }
 
     /**
