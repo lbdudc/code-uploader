@@ -117,6 +117,8 @@ class BasicSSHUploadStrategy extends UploadStrategy {
     async _sendCode(config) {
         const { host, username, port, certRoute, repoPath, remoteRepoPath } = config;
 
+        const outterQuot = os.type().toLowerCase().includes('windows') ? '"' : "'";
+
         // Zip the code
         console.log('---- Zipping code...');
         const absPath = await getAbsolutePath(repoPath);
@@ -127,9 +129,13 @@ class BasicSSHUploadStrategy extends UploadStrategy {
 
         // Check if the folder exists, if not, create it
         console.log('---- Checking if remote folder exists...');
-        let command = this._getShhCommand(config) + ` "if [ ! -d ${remoteRepoPath} ]; then mkdir ${remoteRepoPath}; fi"`;
+        let command = this._getShhCommand(config) + ` ${outterQuot}if [ ! -d ${remoteRepoPath} ]; then mkdir ${remoteRepoPath}; fi${outterQuot}`;
         await executeCommand(command);
 
+        // Delete the contents of the remote folder
+        console.log('---- Deleting contents of remote folder...');
+        command = this._getShhCommand(config) + ` ${outterQuot}rm -rf ${remoteRepoPath}/*${outterQuot}`;
+        await executeCommand(command);
 
         // Upload the code to the remote machine
         console.log('---- Uploading code to local instance...');
