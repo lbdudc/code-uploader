@@ -7,6 +7,7 @@
   "scripts": {
     "sshExample": "node ./examples/SSHExample.js",
     "awsExample": "node ./examples/AWSExample.js",
+    "localExample": "node ./examples/LocalExample.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
