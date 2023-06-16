@@ -118,6 +118,7 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         const { host, username, port, certRoute, repoPath, remoteRepoPath } = config;
 
         const outterQuot = os.type().toLowerCase().includes('windows') ? '"' : "'";
+        const innerQuot = os.type().toLowerCase().includes('windows') ? "'" : '"';
 
         // Zip the code
         console.log('---- Zipping code...');
@@ -134,7 +135,7 @@ class BasicSSHUploadStrategy extends UploadStrategy {
 
         // If docker is installed, do a docker-compose down first
         console.log('---- Deleting contents of remote folder...');
-        command = this._getShhCommand(config) + ` ${outterQuot}if [ -x "$(command -v docker)" ]; then cd ${remoteRepoPath}/deploy && docker-compose down; fi${outterQuot}`;
+        command = this._getShhCommand(config) + ` ${outterQuot}if [ -x ${innerQuot}$(command -v docker)${innerQuot} ]; then cd ${remoteRepoPath}/deploy && docker-compose down; fi${outterQuot}`;
         await executeCommand(command);
 
         // Delete the contents of the remote folder
@@ -159,9 +160,9 @@ class BasicSSHUploadStrategy extends UploadStrategy {
         // Unzip the code
         console.log('---- Unzipping code...');
         // check if unzip is installed, if not, install it
-        command = this._getShhCommand(config) + ' "if [ ! -x "$(command -v unzip)" ]; then sudo apt -y install unzip; fi"';
+        command = this._getShhCommand(config) + ` ${outterQuot}if [ ! -x ${innerQuot}$(command -v unzip)${innerQuot} ]; then sudo apt -y install unzip; fi${outterQuot}`;
         await executeCommand(command);
-        command = this._getShhCommand(config) + ` "unzip -o ${remoteRepoPath}/${zipName} -d ${remoteRepoPath}"`;
+        command = this._getShhCommand(config) + ` ${outterQuot}unzip -o ${remoteRepoPath}/${zipName} -d ${remoteRepoPath}${outterQuot}`;
         await executeCommand(command);
 
         // Remove the zip file from the remote machine and the local machine
