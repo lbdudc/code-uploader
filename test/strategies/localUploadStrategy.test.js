@@ -38,11 +38,11 @@ describe("LocalUploadStrategy.js Tests", () => {
                     expect(code).toBe(1);
                     expect(stderr).toContain("docker");
                 }
-
                 // if docker is up, expect Hello world container to be running
             } else {
-                const { stdout } = await strategy.uploadCode(config);
-                expect(stdout).toContain("Hello world");
+                const { stderr, code } = await strategy.uploadCode(config);
+                expect(code).toBe(0);
+                expect(stderr).toContain("deploy-hello_world");
             }
         });
 
