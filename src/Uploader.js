@@ -17,6 +17,10 @@ class Uploader {
         return await this._uploadStrategy.uploadCode(config);
     }
 
+    async createInstance(config) {
+        return await this._uploadStrategy.createInstance(config);
+    }
+
     async executeCommand(command) {
         return await this._uploadStrategy.executeCommand(command);
     }
