@@ -4,7 +4,7 @@ import path from 'path';
 export const getAbsolutePath = (folderPath) => {
     if (path.isAbsolute(folderPath))
         return folderPath;
-    
+
     return path.join(process.cwd(), folderPath);
 };
 
@@ -41,6 +41,15 @@ export const executeCommand = async (command, timeout) => {
         });
 
         childProcess.on('close', (code) => {
+            if (code !== 0) {
+                reject({
+                    code: code,
+                    stderr: stderrData,
+                    stdout: stdoutData
+                });
+                return;
+            }
+
             resolve({
                 stdout: stdoutData,
                 stderr: stderrData,

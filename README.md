@@ -29,7 +29,7 @@ npm install
 
 - Must be a root user or have sudo privileges in the server where you want to upload the code
 
-## Known Issues :warning:
+## Known Issues :warning
 
 In AWS instances, the docker-compose up command fails with the basic EC2 free tier instance. This is because the instance does not have enough memory to run the docker-compose up command. To solve this, you can use a bigger instance
 
@@ -75,20 +75,29 @@ const uploader = new Uploader();
 // Set the upload strategy
 uploader.setUploadStrategy(new AWSUploadStrategy());
 
-// Upload the code
-const uploadRes = await uploader.uploadCode({
-    AWS_ACCESS_KEY_ID,
-    AWS_SECRET_ACCESS_KEY,
-    AWS_REGION,
-    AWS_AMI_ID,
-    AWS_INSTANCE_TYPE,
-    AWS_INSTANCE_NAME,
-    AWS_SECURITY_GROUP_ID,
-    AWS_KEY_NAME,
-    AWS_USERNAME,
-    AWS_SSH_PRIVATE_KEY_PATH,
-    REPO_DIRECTORY,
-    REMOTE_REPO_PATH: `/home/${AWS_USERNAME}/code`,
+// Create AWS instance
+const hostIp = await uploader.createInstance({
+    AWS_SECRET_ACCESS_KEY: '',
+    AWS_REGION: 'eu-west-2',
+    AWS_AMI_ID: 'ami-08b064b1296caf3b2',
+    AWS_INSTANCE_TYPE: 't2.micro',
+    AWS_INSTANCE_NAME: 'my-aws-instance',
+    AWS_SECURITY_GROUP_ID: 'sg-xxxxxxxxxxxxxxxxx',
+    AWS_KEY_NAME: 'my-key-pair',
+    AWS_USERNAME: 'ec2-user',
+    AWS_SSH_PRIVATE_KEY_PATH:'./my-key-pair.pem',
+    AWS_ACCESS_KEY_ID: '',
+});
+
+// Upload code by SCP, configure instance, and run docker-compose up
+await uploader.uploadCode({
+    host: hostIp,
+    username: 'ec2-user',
+    certRoute: './my-key-pair.pem',
+    awsRegion: 'eu-west-2',
+    repoPath: '../code',
+    remoteRepoPath: `/home/ec2-user/code`,
+    // forceBuild: true,
 });
 ```
 

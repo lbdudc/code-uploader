@@ -6,8 +6,8 @@ class LocalUploadStrategy extends UploadStrategy {
     async uploadCode(config) {
 
         // STEP 1: Run docker-compose up --build
-        console.log('SETP 1/1 - Running docker-compose up');
-        await this._runDockerComposeUp(config);
+        console.log('STEP 1/1 - Running docker-compose up');
+        return await this._runDockerComposeUp(config);
     }
 
 
@@ -17,7 +17,8 @@ class LocalUploadStrategy extends UploadStrategy {
         // Run docker-compose up
         console.log('Running docker-compose up...')
         let command = `cd ${repoPath}/deploy && docker-compose up --build -d`
-        await executeCommand(command)
+
+        return await executeCommand(command);
     }
 
 }

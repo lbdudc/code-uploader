@@ -7,9 +7,7 @@ dotenv.config();
 const uploader = new Uploader();
 uploader.setUploadStrategy(new AWSUploadStrategy());
 
-// Create AWS instance, upload code by SCP, configure instance, and run docker-compose up
-await uploader.uploadCode({
-    AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID || '',
+const hostIp = await uploader.createInstance({
     AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY || '',
     AWS_REGION: process.env.AWS_REGION || 'eu-west-2',
     AWS_AMI_ID: process.env.AWS_AMI_ID || 'ami-08b064b1296caf3b2',
@@ -19,7 +17,17 @@ await uploader.uploadCode({
     AWS_KEY_NAME: process.env.AWS_KEY_NAME || 'my-key-pair',
     AWS_USERNAME: process.env.AWS_USERNAME || 'ec2-user',
     AWS_SSH_PRIVATE_KEY_PATH: process.env.AWS_SSH_PRIVATE_KEY_PATH || './my-key-pair.pem',
+    AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID || '',
+});
 
-    REPO_DIRECTORY: process.env.REPO_DIRECTORY || '../code',
-    REMOTE_REPO_PATH: `/home/${process.env.AWS_USERNAME || 'ec2-user'}/code`,
+
+// Create AWS instance, upload code by SCP, configure instance, and run docker-compose up
+await uploader.uploadCode({
+    host: hostIp,
+    username: process.env.AWS_USERNAME || 'ec2-user',
+    certRoute: process.env.AWS_SSH_PRIVATE_KEY_PATH || './my-key-pair.pem',
+    awsRegion: process.env.AWS_REGION || 'eu-west-2',
+    repoPath: process.env.REPO_DIRECTORY || '../code',
+    remoteRepoPath: `/home/${process.env.AWS_USERNAME || 'ec2-user'}/code`,
+    // forceBuild: true,
 });

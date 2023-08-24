@@ -2,10 +2,15 @@ import UploadStrategy from "./UploadStrategy.js";
 import { executeCommand, getAbsolutePath } from '../utils/utils.js';
 import { compressFolder } from '../utils/zipUtils.js';
 import { EC2Client, RunInstancesCommand, waitUntilInstanceRunning, StartInstancesCommand, DescribeInstancesCommand } from "@aws-sdk/client-ec2";
-import fs, { rmSync } from 'fs';
+import fs, { rm, rmSync } from 'fs';
 import os from 'os';
 
 class AWSUploadStrategy extends UploadStrategy {
+
+    constructor() {
+        super();
+        this.URL = null;
+    }
 
     /**
     * Uploads the code to the remote machine, sets up the machine, and runs docker-compose up
@@ -13,26 +18,28 @@ class AWSUploadStrategy extends UploadStrategy {
     */
     async uploadCode(config) {
 
-        config.REPO_DIRECTORY = config.REPO_DIRECTORY || config.repoPath;
+        const publicIp = config.host || this.URL;
 
-        console.log('STEP 1/5 - Preparing code for upload...');
+        console.log('STEP 1/4 - Preparing code for upload...');
         await this._prepareCode(config);
 
-        // STEP 1 - CREATE INSTANCE
-        console.log('STEP 2/5 - Creating instance...');
-        const { publicIp } = await this._createInstance(config);
-
         // STEP 2 - SEND CODE
-        console.log('STEP 3/5 - Sending code...');
+        console.log('STEP 2/4 - Sending code...');
         await this._sendCode({ ...config, publicIp });
 
         // STEP 3 - CONFIGURE INSTANCE
-        console.log('STEP 4/5 - Configuring instance...');
+        console.log('STEP 3/4 - Configuring instance...');
         await this._configureInstance({ ...config, publicIp });
 
         // STEP 4 - RUN DOCKER-COMPOSE UP
-        console.log('STEP 5/5 - Running docker-compose up...');
+        console.log('STEP 4/4 - Running docker-compose up...');
         await this._runDockerComposeUp({ ...config, publicIp });
+
+        return this.URL;
+    }
+
+    getURL() {
+        return this.URL;
     }
 
     async _prepareCode(config) {
@@ -46,10 +53,10 @@ class AWSUploadStrategy extends UploadStrategy {
     }
 
     async _buildClient(config) {
-        const { REPO_DIRECTORY } = config;
+        const { repoPath } = config;
 
         // Check if the client has node_modules folder
-        const absPath = await getAbsolutePath(REPO_DIRECTORY);
+        const absPath = await getAbsolutePath(repoPath);
         const clientPath = absPath + '/client';
 
         const nodeModulesPath = clientPath + '/node_modules';
@@ -109,7 +116,9 @@ class AWSUploadStrategy extends UploadStrategy {
      * @param {Object} config Configuration object
      * @returns {Promise<Object>} Object containing the instance ID and public IP of the AWS instance
      */
-    async _createInstance(config) {
+    async createInstance(config) {
+
+        console.log('Creating instance...');
 
         const { AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION } = config;
         const { AWS_INSTANCE_NAME, AWS_INSTANCE_TYPE, AWS_AMI_ID, AWS_KEY_NAME, AWS_SECURITY_GROUP_ID } = config;
@@ -152,23 +161,22 @@ class AWSUploadStrategy extends UploadStrategy {
 
             console.log(`Instance ${InstanceId} is now running with public IP ${PublicIpAddress}`);
 
-            return {
-                instanceId: InstanceId,
-                publicIp: PublicIpAddress,
-            };
+            this.URL = `http://${PublicIpAddress}:80`;
+
+            return PublicIpAddress;
         } catch (err) {
             console.error(err);
         }
     }
 
     async _sendCode({ publicIp, ...config }) {
-        const { AWS_SSH_PRIVATE_KEY_PATH, REPO_DIRECTORY, REMOTE_REPO_PATH, AWS_USERNAME } = config;
+        const { certRoute, repoPath, remoteRepoPath, username } = config;
 
         const outterQuot = os.type().toLowerCase().includes('windows') ? '"' : "'";
 
         // Zip the code
         console.log('----- Zipping code...');
-        const absPath = await getAbsolutePath(REPO_DIRECTORY);
+        const absPath = await getAbsolutePath(repoPath);
         const zipPath = absPath + '.zip';
         const zipName = absPath.split(/\/|\\/).pop() + '.zip';
 
@@ -176,28 +184,25 @@ class AWSUploadStrategy extends UploadStrategy {
 
         // Check if the folder exists, if not, create it
         console.log('----- Checking if remote folder exists...');
-        let command = this._getSSHCredentials({ publicIp, ...config }) + ` ${outterQuot} if [ ! -d ${REMOTE_REPO_PATH} ]; then mkdir ${REMOTE_REPO_PATH}; fi ${outterQuot}`;
+        let command = this._getSSHCredentials({ publicIp, ...config }) + ` ${outterQuot} if [ ! -d ${remoteRepoPath} ]; then mkdir ${remoteRepoPath}; fi ${outterQuot}`;
         await executeCommand(command);
 
         // Upload the code to the AWS instance
         console.log('----- Copying repository to instance...');
-        command = `scp -o StrictHostKeyChecking=no -i ${AWS_SSH_PRIVATE_KEY_PATH} ${zipPath} ${AWS_USERNAME}@${publicIp}:${REMOTE_REPO_PATH}`;
+        command = `scp -o StrictHostKeyChecking=no -i ${certRoute} ${zipPath} ${username}@${publicIp}:${remoteRepoPath}`;
         await executeCommand(command)
 
         // Unzip the code
         console.log('----- Unzipping code...');
-        // check if unzip is installed, if not, install it
-        command = this._getSSHCredentials({ publicIp, ...config }) + ` ${outterQuot} if ! command -v unzip &> /dev/null; then sudo yum install unzip -y; fi ${outterQuot}`;
-        await executeCommand(command);
 
-        command = this._getSSHCredentials({ publicIp, ...config }) + ` ${outterQuot} unzip -o ${REMOTE_REPO_PATH}/${zipName} -d ${REMOTE_REPO_PATH} ${outterQuot}`;
+        command = this._getSSHCredentials({ publicIp, ...config }) + ` ${outterQuot} unzip -o ${remoteRepoPath}/${zipName} -d ${remoteRepoPath} ${outterQuot}`;
         await executeCommand(command);
 
         // Remove the zip files from the AWS instance and local machine
         console.log('----- Removing zip files...');
-        command = this._getSSHCredentials({ publicIp, ...config }) + ` ${outterQuot} rm ${REMOTE_REPO_PATH}/${zipName} ${outterQuot}`;
+        command = this._getSSHCredentials({ publicIp, ...config }) + ` ${outterQuot} rm ${remoteRepoPath}/${zipName} ${outterQuot}`;
         await executeCommand(command);
-        rmSync(zipPath, () => { });
+        rmSync(zipPath, { recursive: true });
     }
 
     /**
@@ -231,13 +236,13 @@ class AWSUploadStrategy extends UploadStrategy {
      */
     async _runDockerComposeUp(config) {
 
-        const { AWS_USERNAME } = config;
+        const { username } = config;
 
         const outterQuot = os.type().toLowerCase().includes('windows') ? '"' : "'";
 
         // Run docker-compose up
         console.log('Connecting to instance and running docker-compose up...')
-        const command = this._getSSHCredentials(config) + " " + outterQuot + `cd /home/${AWS_USERNAME}/code/deploy && sudo docker-compose up -d` + outterQuot;
+        const command = this._getSSHCredentials(config) + " " + outterQuot + `cd /home/${username}/code/deploy && sudo docker-compose up -d` + outterQuot;
         await executeCommand(command)
     }
 
@@ -247,10 +252,10 @@ class AWSUploadStrategy extends UploadStrategy {
      * @returns {String} Formatted SSH credentials
      */
     _getSSHCredentials(config) {
-        const { publicIp, AWS_SSH_PRIVATE_KEY_PATH, AWS_USERNAME, AWS_REGION } = config;
+        const { publicIp, certRoute, username, awsRegion } = config;
         //ssh -o StrictHostKeyChecking=no -i .\mykey.pem ec2-user@ec2-13-41-81-214.eu-west-2.compute.amazonaws.com
         const formattedIp = publicIp.replace(/\./g, '-');
-        return `ssh -o StrictHostKeyChecking=no -i ${AWS_SSH_PRIVATE_KEY_PATH} ${AWS_USERNAME}@ec2-${formattedIp}.${AWS_REGION}.compute.amazonaws.com `;
+        return `ssh -o StrictHostKeyChecking=no -i ${certRoute} ${username}@ec2-${formattedIp}.${awsRegion}.compute.amazonaws.com `;
     }
 
     /**
