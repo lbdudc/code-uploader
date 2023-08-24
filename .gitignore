@@ -9,6 +9,8 @@ node_modules
 *.sln
 *.sw?
 *.iml
+coverage
+code
 
 .env
 *.pem

@@ -1,6 +1,6 @@
 {
   "name": "code-uploader",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "description": "Uploader of code to servers",
   "main": "index.js",
   "type": "module",
