@@ -135,7 +135,7 @@ class BasicSSHUploadStrategy extends UploadStrategy {
 
         // If docker is installed, do a docker-compose down first
         console.log('---- Deleting contents of remote folder...');
-        command = this._getShhCommand(config) + ` ${outterQuot}if [ -x ${innerQuot}$(command -v docker)${innerQuot} ]; then cd ${remoteRepoPath}/deploy && docker-compose down; fi${outterQuot}`;
+        command = this._getShhCommand(config) + ` ${outterQuot}if [ -x ${innerQuot}$(command -v docker)${innerQuot} ]; then cd ${remoteRepoPath}/deploy && docker-compose down -v; fi${outterQuot}`;
         await executeCommand(command);
 
         // Delete the contents of the remote folder
