@@ -1,24 +1,19 @@
-# Code uploader
+# Code Uploader
 
-This is a library to upload code to a server and execute it.
+![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)
+![Node.js Version](https://img.shields.io/badge/node-%3E%3D%2012.0.0-brightgreen.svg)
+![npm version](https://badge.fury.io/js/code-uploader.svg)
+
+## Description
+
+The **Code Uploader** is a versatile library designed to simplify the process of uploading code to a server and executing it via docker-compose. This library provides flexible strategies to facilitate code deployment across different environments, such as SSH-based servers, AWS instances, and local setups.
 
 ## Installation
 
-In the `package.json` file, add the following:
-
-```json
-"dependencies": {
-    "code-uploader": "git+https://gitlab.lbd.org.es/GEMA/lps/code-uploader.git"
-}
-```
-
-Execute the following command:
+Install the package via npm:
 
 ```bash
-# Optional
-nvm use 
-
-npm install
+npm install @lbdudc/gp-code-uploader
 ```
 
 ## Pre-requisites
@@ -29,9 +24,9 @@ npm install
 
 - Must be a root user or have sudo privileges in the server where you want to upload the code
 
-## Known Issues :warning
+## Known Issues :warning:
 
-In AWS instances, the docker-compose up command fails with the basic EC2 free tier instance. This is because the instance does not have enough memory to run the docker-compose up command. To solve this, you can use a bigger instance
+In AWS instances, the docker-compose up command can fail with the basic EC2 free tier instance. This is because the instance does not have enough memory to run the docker-compose up command. To solve this, you can use a bigger instance
 
 ## Example Usages
 
@@ -122,3 +117,23 @@ You need to create an AWS instance with the following:
 - An IAM role with the following permissions: [guide](https://docs.aws.amazon.com/singlesignon/latest/userguide/what-is.html?icmpid=docs_console_unmapped)
   - AmazonEC2FullAccess
 - Get your AWS access key and secret key: [guide](https://docs.aws.amazon.com/general/latest/gr/aws-sec-cred-types.html#access-keys-and-secret-access-keys)
+
+## Dependencies
+
+- **@aws-sdk/client-ec2**: ^3.32.0
+- **dotenv**: ^16.0.3
+- **jszip**: ^3.10.1
+
+## Dev Dependencies
+
+- **@vitest/coverage-istanbul**: ^0.32.2
+- **vitest**: ^0.32.0
+
+## Author
+
+Victor Lamas
+Email: <victor.lamas@udc.es>
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
