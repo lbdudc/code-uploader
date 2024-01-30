@@ -1,6 +1,6 @@
 {
   "name": "@lbdudc/gp-code-uploader",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "homepage": "https://gitlab.lbd.org.es/publico/gis-publisher/code-uploader",
   "description": "Code Uploader is a flexible library that simplifies uploading code to a server and executing it via docker-compose. This module offers various code distribution options for SSH-based servers, AWS instances, and local installations.",
   "main": "index.js",
