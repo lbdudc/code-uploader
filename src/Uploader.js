@@ -5,25 +5,25 @@
  */
 
 class Uploader {
-    constructor() {
-        this._uploadStrategy = null;
-    }
+  constructor() {
+    this._uploadStrategy = null;
+  }
 
-    setUploadStrategy(uploadStrategy) {
-        this._uploadStrategy = uploadStrategy;
-    }
+  setUploadStrategy(uploadStrategy) {
+    this._uploadStrategy = uploadStrategy;
+  }
 
-    async uploadCode(config) {
-        return await this._uploadStrategy.uploadCode(config);
-    }
+  async uploadCode(config) {
+    return await this._uploadStrategy.uploadCode(config);
+  }
 
-    async createInstance(config) {
-        return await this._uploadStrategy.createInstance(config);
-    }
+  async createInstance(config) {
+    return await this._uploadStrategy.createInstance(config);
+  }
 
-    async executeCommand(command) {
-        return await this._uploadStrategy.executeCommand(command);
-    }
+  async executeCommand(command) {
+    return await this._uploadStrategy.executeCommand(command);
+  }
 }
 
 export default Uploader;

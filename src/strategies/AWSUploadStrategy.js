@@ -1,310 +1,341 @@
 import UploadStrategy from "./UploadStrategy.js";
-import { executeCommand, getAbsolutePath } from '../utils/utils.js';
-import { compressFolder } from '../utils/zipUtils.js';
-import { EC2Client, RunInstancesCommand, waitUntilInstanceRunning, StartInstancesCommand, DescribeInstancesCommand } from "@aws-sdk/client-ec2";
-import fs, { rm, rmSync } from 'fs';
-import os from 'os';
+import { executeCommand, getAbsolutePath } from "../utils/utils.js";
+import { compressFolder } from "../utils/zipUtils.js";
+import {
+  EC2Client,
+  RunInstancesCommand,
+  waitUntilInstanceRunning,
+  StartInstancesCommand,
+  DescribeInstancesCommand,
+} from "@aws-sdk/client-ec2";
+import fs, { rm, rmSync } from "fs";
+import os from "os";
 
 class AWSUploadStrategy extends UploadStrategy {
+  constructor() {
+    super();
+    this.URL = null;
+  }
 
-    constructor() {
-        super();
-        this.URL = null;
+  /**
+   * Uploads the code to the remote machine, sets up the machine, and runs docker-compose up
+   * @param {Object} config Configuration object
+   */
+  async uploadCode(config) {
+    const publicIp = config.host || this.URL;
+
+    console.log("STEP 1/4 - Preparing code for upload...");
+    await this._prepareCode(config);
+
+    // STEP 2 - SEND CODE
+    console.log("STEP 2/4 - Sending code...");
+    await this._sendCode({ ...config, publicIp });
+
+    // STEP 3 - CONFIGURE INSTANCE
+    console.log("STEP 3/4 - Configuring instance...");
+    await this._configureInstance({ ...config, publicIp });
+
+    // STEP 4 - RUN DOCKER-COMPOSE UP
+    console.log("STEP 4/4 - Running docker-compose up...");
+    await this._runDockerComposeUp({ ...config, publicIp });
+
+    return this.URL;
+  }
+
+  getURL() {
+    return this.URL;
+  }
+
+  async _prepareCode(config) {
+    const { forceBuild } = config;
+
+    // If forceBuild is true, build the client
+    if (!!forceBuild) {
+      // Build the client
+      await this._buildClient(config);
+    }
+  }
+
+  async _buildClient(config) {
+    const { repoPath } = config;
+
+    // Check if the client has node_modules folder
+    const absPath = await getAbsolutePath(repoPath);
+    const clientPath = absPath + "/client";
+
+    const nodeModulesPath = clientPath + "/node_modules";
+
+    console.log(nodeModulesPath);
+
+    // Get the node version from .nvmrc file
+    const nodeVersion = fs.readFileSync(clientPath + "/.nvmrc", "utf8").trim();
+
+    // If it doesn't have node_modules folder, install the dependencies
+    if (!fs.existsSync(nodeModulesPath)) {
+      console.log("---- Installing dependencies...");
+      const command = `cd ${clientPath} && npm_config_node_version=${nodeVersion} npm install`;
+      try {
+        await executeCommand(command);
+      } catch (error) {
+        console.error(error);
+        return;
+      }
+    } else {
+      console.log("---- Dependencies already installed!");
     }
 
-    /**
-    * Uploads the code to the remote machine, sets up the machine, and runs docker-compose up
-    * @param {Object} config Configuration object
-    */
-    async uploadCode(config) {
-
-        const publicIp = config.host || this.URL;
-
-        console.log('STEP 1/4 - Preparing code for upload...');
-        await this._prepareCode(config);
-
-        // STEP 2 - SEND CODE
-        console.log('STEP 2/4 - Sending code...');
-        await this._sendCode({ ...config, publicIp });
-
-        // STEP 3 - CONFIGURE INSTANCE
-        console.log('STEP 3/4 - Configuring instance...');
-        await this._configureInstance({ ...config, publicIp });
-
-        // STEP 4 - RUN DOCKER-COMPOSE UP
-        console.log('STEP 4/4 - Running docker-compose up...');
-        await this._runDockerComposeUp({ ...config, publicIp });
-
-        return this.URL;
+    // Build the client
+    console.log("---- Building client...");
+    const command = `cd ${clientPath} && npm_config_node_version=${nodeVersion} npm run build`;
+    try {
+      await executeCommand(command);
+    } catch (error) {
+      console.error(error);
+      return;
     }
 
-    getURL() {
-        return this.URL;
+    // Remove the node_modules folder
+    console.log("---- Removing node_modules folder...");
+    rm(nodeModulesPath, { recursive: true }, () => {});
+
+    // Delete the client service from docker-compose.yml
+    console.log("---- Comment client service from docker-compose.yml...");
+    const dockerComposePath = absPath + "/deploy/docker-compose.yml";
+    const dockerCompose = fs.readFileSync(dockerComposePath, "utf8");
+    try {
+      // Comment all lines of the client service
+      const clientService = dockerCompose.match(
+        /client:\n\s+build:\n\s+context:.*\n\s+dockerfile:.*\n\s+container_name:.*\n\s+networks:\n\s+- local\n\s+volumes:\n\s+-.*\n/g,
+      )[0];
+      const newDockerCompose = dockerCompose.replace(
+        clientService,
+        clientService
+          .split("\n")
+          .map((line) => `# ${line}`)
+          .join("\n"),
+      );
+      fs.writeFileSync(dockerComposePath, newDockerCompose, "utf8");
+    } catch (error) {
+      console.log("---- Docker-compose not modified!");
+      return;
     }
+  }
 
-    async _prepareCode(config) {
-        const { forceBuild } = config;
+  /**
+   * Creates an AWS instance with the specified configuration
+   * @param {Object} config Configuration object
+   * @returns {Promise<Object>} Object containing the instance ID and public IP of the AWS instance
+   */
+  async createInstance(config) {
+    console.log("Creating instance...");
 
-        // If forceBuild is true, build the client
-        if (!!forceBuild) {
-            // Build the client
-            await this._buildClient(config);
-        }
-    }
+    const { AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION } = config;
+    const {
+      AWS_INSTANCE_NAME,
+      AWS_INSTANCE_TYPE,
+      AWS_AMI_ID,
+      AWS_KEY_NAME,
+      AWS_SECURITY_GROUP_ID,
+    } = config;
 
-    async _buildClient(config) {
-        const { repoPath } = config;
+    const client = new EC2Client({
+      region: AWS_REGION,
+      credentials: {
+        accessKeyId: AWS_ACCESS_KEY_ID,
+        secretAccessKey: AWS_SECRET_ACCESS_KEY,
+      },
+    });
 
-        // Check if the client has node_modules folder
-        const absPath = await getAbsolutePath(repoPath);
-        const clientPath = absPath + '/client';
-
-        const nodeModulesPath = clientPath + '/node_modules';
-
-        console.log(nodeModulesPath);
-
-        // Get the node version from .nvmrc file
-        const nodeVersion = fs.readFileSync(clientPath + '/.nvmrc', 'utf8').trim();
-
-        // If it doesn't have node_modules folder, install the dependencies
-        if (!fs.existsSync(nodeModulesPath)) {
-            console.log('---- Installing dependencies...');
-            const command = `cd ${clientPath} && npm_config_node_version=${nodeVersion} npm install`;
-            try {
-                await executeCommand(command);
-            } catch (error) {
-                console.error(error);
-                return;
-            }
-        } else {
-            console.log('---- Dependencies already installed!');
-        }
-
-        // Build the client
-        console.log('---- Building client...');
-        const command = `cd ${clientPath} && npm_config_node_version=${nodeVersion} npm run build`;
-        try {
-            await executeCommand(command);
-        } catch (error) {
-            console.error(error);
-            return;
-        }
-
-        // Remove the node_modules folder
-        console.log('---- Removing node_modules folder...');
-        rm(nodeModulesPath, { recursive: true }, () => { });
-
-
-        // Delete the client service from docker-compose.yml
-        console.log('---- Comment client service from docker-compose.yml...');
-        const dockerComposePath = absPath + '/deploy/docker-compose.yml';
-        const dockerCompose = fs.readFileSync(dockerComposePath, 'utf8');
-        try {
-            // Comment all lines of the client service
-            const clientService = dockerCompose.match(/client:\n\s+build:\n\s+context:.*\n\s+dockerfile:.*\n\s+container_name:.*\n\s+networks:\n\s+- local\n\s+volumes:\n\s+-.*\n/g)[0];
-            const newDockerCompose = dockerCompose.replace(clientService, clientService.split('\n').map(line => `# ${line}`).join('\n'));
-            fs.writeFileSync(dockerComposePath, newDockerCompose, 'utf8');
-        } catch (error) {
-            console.log('---- Docker-compose not modified!');
-            return;
-        }
-
-    }
-
-    /**
-     * Creates an AWS instance with the specified configuration
-     * @param {Object} config Configuration object
-     * @returns {Promise<Object>} Object containing the instance ID and public IP of the AWS instance
-     */
-    async createInstance(config) {
-
-        console.log('Creating instance...');
-
-        const { AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION } = config;
-        const { AWS_INSTANCE_NAME, AWS_INSTANCE_TYPE, AWS_AMI_ID, AWS_KEY_NAME, AWS_SECURITY_GROUP_ID } = config;
-
-        const client = new EC2Client(
+    const input = {
+      ImageId: AWS_AMI_ID,
+      InstanceType: AWS_INSTANCE_TYPE,
+      KeyName: AWS_KEY_NAME,
+      MaxCount: 1,
+      MinCount: 1,
+      Monitoring: {
+        Enabled: true,
+      },
+      SecurityGroupIds: [AWS_SECURITY_GROUP_ID],
+      TagSpecifications: [
+        {
+          ResourceType: "instance",
+          Tags: [
             {
-                region: AWS_REGION,
-                credentials: {
-                    accessKeyId: AWS_ACCESS_KEY_ID,
-                    secretAccessKey: AWS_SECRET_ACCESS_KEY
-                }
-            }
-        );
-
-        const input = {
-            ImageId: AWS_AMI_ID,
-            InstanceType: AWS_INSTANCE_TYPE,
-            KeyName: AWS_KEY_NAME,
-            MaxCount: 1,
-            MinCount: 1,
-            Monitoring: {
-                Enabled: true,
+              Key: "Name",
+              Value: AWS_INSTANCE_NAME,
             },
-            SecurityGroupIds: [AWS_SECURITY_GROUP_ID],
-            TagSpecifications: [
-                {
-                    ResourceType: "instance",
-                    Tags: [
-                        {
-                            Key: "Name",
-                            Value: AWS_INSTANCE_NAME,
-                        },
-                    ],
-                },
-            ],
-        };
+          ],
+        },
+      ],
+    };
 
-        try {
-            const { PublicIpAddress, InstanceId } = await this._startInstance(input, client);
+    try {
+      const { PublicIpAddress, InstanceId } = await this._startInstance(
+        input,
+        client,
+      );
 
-            console.log(`Instance ${InstanceId} is now running with public IP ${PublicIpAddress}`);
+      console.log(
+        `Instance ${InstanceId} is now running with public IP ${PublicIpAddress}`,
+      );
 
-            this.URL = `http://${PublicIpAddress}:80`;
+      this.URL = `http://${PublicIpAddress}:80`;
 
-            return PublicIpAddress;
-        } catch (err) {
-            console.error(err);
-        }
+      return PublicIpAddress;
+    } catch (err) {
+      console.error(err);
     }
+  }
 
-    async _sendCode({ publicIp, ...config }) {
-        const { certRoute, repoPath, remoteRepoPath, username } = config;
+  async _sendCode({ publicIp, ...config }) {
+    const { certRoute, repoPath, remoteRepoPath, username } = config;
 
-        const outterQuot = os.type().toLowerCase().includes('windows') ? '"' : "'";
+    const outterQuot = os.type().toLowerCase().includes("windows") ? '"' : "'";
 
-        // Zip the code
-        console.log('----- Zipping code...');
-        const absPath = await getAbsolutePath(repoPath);
-        const zipPath = absPath + '.zip';
-        const zipName = absPath.split(/\/|\\/).pop() + '.zip';
+    // Zip the code
+    console.log("----- Zipping code...");
+    const absPath = await getAbsolutePath(repoPath);
+    const zipPath = absPath + ".zip";
+    const zipName = absPath.split(/\/|\\/).pop() + ".zip";
 
-        await compressFolder(absPath, `${zipPath}`);
+    await compressFolder(absPath, `${zipPath}`);
 
-        // Check if the folder exists, if not, create it
-        console.log('----- Checking if remote folder exists...');
-        let command = this._getSSHCredentials({ publicIp, ...config }) + ` ${outterQuot} if [ ! -d ${remoteRepoPath} ]; then mkdir ${remoteRepoPath}; fi ${outterQuot}`;
-        await executeCommand(command);
+    // Check if the folder exists, if not, create it
+    console.log("----- Checking if remote folder exists...");
+    let command =
+      this._getSSHCredentials({ publicIp, ...config }) +
+      ` ${outterQuot} if [ ! -d ${remoteRepoPath} ]; then mkdir ${remoteRepoPath}; fi ${outterQuot}`;
+    await executeCommand(command);
 
-        // Upload the code to the AWS instance
-        console.log('----- Copying repository to instance...');
-        command = `scp -o StrictHostKeyChecking=no -i ${certRoute} ${zipPath} ${username}@${publicIp}:${remoteRepoPath}`;
-        await executeCommand(command)
+    // Upload the code to the AWS instance
+    console.log("----- Copying repository to instance...");
+    command = `scp -o StrictHostKeyChecking=no -i ${certRoute} ${zipPath} ${username}@${publicIp}:${remoteRepoPath}`;
+    await executeCommand(command);
 
-        // Unzip the code
-        console.log('----- Unzipping code...');
+    // Unzip the code
+    console.log("----- Unzipping code...");
 
-        command = this._getSSHCredentials({ publicIp, ...config }) + ` ${outterQuot} unzip -o ${remoteRepoPath}/${zipName} -d ${remoteRepoPath} ${outterQuot}`;
-        await executeCommand(command);
+    command =
+      this._getSSHCredentials({ publicIp, ...config }) +
+      ` ${outterQuot} unzip -o ${remoteRepoPath}/${zipName} -d ${remoteRepoPath} ${outterQuot}`;
+    await executeCommand(command);
 
-        // Remove the zip files from the AWS instance and local machine
-        console.log('----- Removing zip files...');
-        command = this._getSSHCredentials({ publicIp, ...config }) + ` ${outterQuot} rm ${remoteRepoPath}/${zipName} ${outterQuot}`;
-        await executeCommand(command);
-        rmSync(zipPath, { recursive: true });
-    }
+    // Remove the zip files from the AWS instance and local machine
+    console.log("----- Removing zip files...");
+    command =
+      this._getSSHCredentials({ publicIp, ...config }) +
+      ` ${outterQuot} rm ${remoteRepoPath}/${zipName} ${outterQuot}`;
+    await executeCommand(command);
+    rmSync(zipPath, { recursive: true });
+  }
 
-    /**
-     * Configures the AWS instance by installing Docker, nginx, and docker-compose
-     * @param {String} publicIp Public IP of the AWS instance 
-     * @param {Object} config Configuration object
-     * 
-     * @returns {Promise<void>}
-     */
-    async _configureInstance(config) {
+  /**
+   * Configures the AWS instance by installing Docker, nginx, and docker-compose
+   * @param {String} publicIp Public IP of the AWS instance
+   * @param {Object} config Configuration object
+   *
+   * @returns {Promise<void>}
+   */
+  async _configureInstance(config) {
+    const outterQuot = os.type().toLowerCase().includes("windows") ? '"' : "'";
 
-        const outterQuot = os.type().toLowerCase().includes('windows') ? '"' : "'";
+    let command = "";
 
-        let command = '';
+    // Connect to instance and install Docker
+    console.log("Connecting to instance and installing Docker...");
+    command =
+      this._getSSHCredentials(config) +
+      ` ${outterQuot} sudo yum update -y && sudo yum install -y docker && sudo service docker start ${outterQuot}`;
+    await executeCommand(command);
 
-        // Connect to instance and install Docker
-        console.log('Connecting to instance and installing Docker...');
-        command = this._getSSHCredentials(config) + ` ${outterQuot} sudo yum update -y && sudo yum install -y docker && sudo service docker start ${outterQuot}`;
-        await executeCommand(command)
+    // Install docker-compose
+    console.log("Connecting to instance and installing docker-compose...");
+    command =
+      this._getSSHCredentials(config) +
+      ` ${outterQuot} sudo curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s | tr \'[:upper:]\' \'[:lower:]\')-$(uname -m) -o /usr/bin/docker-compose && sudo chmod 755 /usr/bin/docker-compose && docker-compose --version ${outterQuot}`;
+    await executeCommand(command);
+  }
 
-        // Install docker-compose
-        console.log('Connecting to instance and installing docker-compose...')
-        command = this._getSSHCredentials(config) + ` ${outterQuot} sudo curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s | tr \'[:upper:]\' \'[:lower:]\')-$(uname -m) -o /usr/bin/docker-compose && sudo chmod 755 /usr/bin/docker-compose && docker-compose --version ${outterQuot}`;
-        await executeCommand(command)
-    }
+  /**
+   * Runs docker-compose up on the AWS instance
+   * @param {String} publicIp Public IP of the AWS instance
+   * @param {Object} config Configuration object
+   */
+  async _runDockerComposeUp(config) {
+    const { username } = config;
 
-    /**
-     * Runs docker-compose up on the AWS instance
-     * @param {String} publicIp Public IP of the AWS instance
-     * @param {Object} config Configuration object
-     */
-    async _runDockerComposeUp(config) {
+    const outterQuot = os.type().toLowerCase().includes("windows") ? '"' : "'";
 
-        const { username } = config;
+    // Run docker-compose up
+    console.log("Connecting to instance and running docker-compose up...");
+    const command =
+      this._getSSHCredentials(config) +
+      " " +
+      outterQuot +
+      `cd /home/${username}/code/deploy && sudo docker-compose up -d` +
+      outterQuot;
+    await executeCommand(command);
+  }
 
-        const outterQuot = os.type().toLowerCase().includes('windows') ? '"' : "'";
+  /**
+   * Formats the SSH credentials to connect to the AWS instance
+   * @param {Object} config
+   * @returns {String} Formatted SSH credentials
+   */
+  _getSSHCredentials(config) {
+    const { publicIp, certRoute, username, awsRegion } = config;
+    //ssh -o StrictHostKeyChecking=no -i .\mykey.pem ec2-user@ec2-13-41-81-214.eu-west-2.compute.amazonaws.com
+    const formattedIp = publicIp.replace(/\./g, "-");
+    return `ssh -o StrictHostKeyChecking=no -i ${certRoute} ${username}@ec2-${formattedIp}.${awsRegion}.compute.amazonaws.com `;
+  }
 
-        // Run docker-compose up
-        console.log('Connecting to instance and running docker-compose up...')
-        const command = this._getSSHCredentials(config) + " " + outterQuot + `cd /home/${username}/code/deploy && sudo docker-compose up -d` + outterQuot;
-        await executeCommand(command)
-    }
+  /**
+   * Starts an AWS instance
+   * @param {Object} input Input object for the RunInstancesCommand
+   * @param {EC2Client} client EC2Client
+   * @returns {Promise<Object>} Object containing the instance ID and public IP of the AWS instance
+   */
+  async _startInstance(input, client) {
+    const command = new RunInstancesCommand(input);
+    const data = await client.send(command);
+    const instanceId = data.Instances[0].InstanceId;
 
-    /**
-     * Formats the SSH credentials to connect to the AWS instance
-     * @param {Object} config 
-     * @returns {String} Formatted SSH credentials
-     */
-    _getSSHCredentials(config) {
-        const { publicIp, certRoute, username, awsRegion } = config;
-        //ssh -o StrictHostKeyChecking=no -i .\mykey.pem ec2-user@ec2-13-41-81-214.eu-west-2.compute.amazonaws.com
-        const formattedIp = publicIp.replace(/\./g, '-');
-        return `ssh -o StrictHostKeyChecking=no -i ${certRoute} ${username}@ec2-${formattedIp}.${awsRegion}.compute.amazonaws.com `;
-    }
+    const startCommand = new StartInstancesCommand({
+      InstanceIds: [instanceId],
+    });
+    await client.send(startCommand);
 
-    /**
-     * Starts an AWS instance
-     * @param {Object} input Input object for the RunInstancesCommand
-     * @param {EC2Client} client EC2Client
-     * @returns {Promise<Object>} Object containing the instance ID and public IP of the AWS instance
-     */
-    async _startInstance(input, client) {
+    console.log(`Waiting for instance ${instanceId} to start up...`);
 
-        const command = new RunInstancesCommand(input);
-        const data = await client.send(command);
-        const instanceId = data.Instances[0].InstanceId;
+    // Await for instance to start up
+    await waitUntilInstanceRunning(
+      { client: client },
+      { InstanceIds: [instanceId] },
+    );
 
-        const startCommand = new StartInstancesCommand({ InstanceIds: [instanceId] });
-        await client.send(startCommand);
+    console.log(`Instance ${instanceId} is now running`);
 
-        console.log(`Waiting for instance ${instanceId} to start up...`);
+    const res = await this._describeInstance(instanceId, client);
+    return {
+      ...res,
+      InstanceId: instanceId,
+    };
+  }
 
-        // Await for instance to start up
-        await waitUntilInstanceRunning(
-            { client: client },
-            { InstanceIds: [instanceId] }
-        );
+  /**
+   * Describes an AWS instance
+   * @param {String} instanceId
+   * @param {EC2Client} client
+   * @returns {Promise<Object>} Object containing the instance ID and public IP of the AWS instance
+   */
+  async _describeInstance(instanceId, client) {
+    const command = new DescribeInstancesCommand({
+      InstanceIds: [instanceId],
+    });
 
-        console.log(`Instance ${instanceId} is now running`);
-
-        const res = await this._describeInstance(instanceId, client);
-        return {
-            ...res,
-            InstanceId: instanceId,
-        }
-    }
-
-    /**
-     * Describes an AWS instance
-     * @param {String} instanceId 
-     * @param {EC2Client} client 
-     * @returns {Promise<Object>} Object containing the instance ID and public IP of the AWS instance
-     */
-    async _describeInstance(instanceId, client) {
-
-        const command = new DescribeInstancesCommand({
-            InstanceIds: [instanceId],
-        })
-
-        const { Reservations } = await client.send(command);
-        return Reservations[0].Instances[0];
-    }
+    const { Reservations } = await client.send(command);
+    return Reservations[0].Instances[0];
+  }
 }
 
 export default AWSUploadStrategy;
