@@ -1,4 +1,4 @@
-import { Uploader, LocalUploadStrategy } from '../index.js';
+import { Uploader, LocalUploadStrategy } from "../index.js";
 
 const uploader = new Uploader();
 
@@ -6,8 +6,7 @@ const uploader = new Uploader();
 uploader.setUploadStrategy(new LocalUploadStrategy());
 
 const config = {
-    repoPath: './code',
-    forceBuild: true,
+  repoPath: "./code",
 };
 
 // Upload code by copying files

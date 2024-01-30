@@ -1,15 +1,22 @@
 {
-  "name": "code-uploader",
-  "version": "1.0.20",
-  "description": "Uploader of code to servers",
+  "name": "@lbdudc/gp-code-uploader",
+  "version": "1.1.0",
+  "homepage": "https://gitlab.lbd.org.es/publico/gis-publisher/code-uploader",
+  "description": "Code Uploader is a flexible library that simplifies uploading code to a server and executing it via docker-compose. This module offers various code distribution options for SSH-based servers, AWS instances, and local installations.",
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "sshExample": "node ./examples/SSHExample.js",
     "awsExample": "node ./examples/AWSExample.js",
+    "coverage": "vitest run --coverage",
+    "eslint:fix": "eslint --ext js --fix src examples",
+    "eslint": "eslint --ext js src examples",
+    "lint:fix": "npm-run-all eslint:fix prettier:fix",
+    "lint": "npm-run-all eslint prettier",
     "localExample": "node ./examples/LocalExample.js",
-    "test": "vitest",
-    "coverage": "vitest run --coverage"
+    "prettier:fix": "prettier --write --ignore-unknown src examples",
+    "prettier": "prettier --check --ignore-unknown src examples",
+    "sshExample": "node ./examples/SSHExample.js",
+    "test": "vitest"
   },
   "dependencies": {
     "@aws-sdk/client-ec2": "^3.32.0",
@@ -23,9 +30,23 @@
     "code"
   ],
   "author": "victor.lamas@udc.es",
-  "license": "ISC",
+  "license": "MIT",
+  "lint-staged": {
+    "*.{js}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,css,html,yml}": "prettier --write"
+  },
   "devDependencies": {
     "@vitest/coverage-v8": "^0.32.2",
+    "eslint": "^8.54.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-prettier": "^5.0.1",
+    "husky": "^8.0.3",
+    "lint-staged": "^15.1.0",
+    "npm-run-all": "^4.1.5",
+    "prettier": "^3.1.0",
     "vitest": "^0.32.2"
   }
 }

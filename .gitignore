@@ -14,3 +14,4 @@ code
 
 .env
 *.pem
+.history
