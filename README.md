@@ -37,7 +37,7 @@ More examples can be found in the `./examples` folder.
 SSH Usage Example
 
 ```js
-import { Uploader, DebianUploadStrategy } from 'code-uploader';
+import { Uploader, DebianUploadStrategy } from '@lbdudc/gp-code-uploader';
 
 const uploader = new Uploader();
 uploader.setUploadStrategy(new DebianUploadStrategy());
@@ -62,7 +62,7 @@ await uploader.uploadCode(config);
 <summary>AWS Usage Example</summary>
 
 ```js
-import { Uploader, AWSUploadStrategy } from 'code-uploader';
+import { Uploader, AWSUploadStrategy } from '@lbdudc/gp-code-uploader';
 
 // Create the uploader
 const uploader = new Uploader();
