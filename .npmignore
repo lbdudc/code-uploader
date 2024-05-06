@@ -6,3 +6,8 @@ test
 .eslintrc.cjs
 .nvmrc
 vitest.config.js
+node_modules
+
+compostela_key
+compostela_key.pub
+compostela_key.ppk
