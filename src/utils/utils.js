@@ -1,4 +1,3 @@
-import { spawn } from "child_process";
 import path from "path";
 
 export const getAbsolutePath = (folderPath) => {
@@ -8,62 +7,20 @@ export const getAbsolutePath = (folderPath) => {
 };
 
 /**
- * Executes a command in the shell
- * @param {String} command Command to execute
- * @param {Number} timeout Timeout in milliseconds (optional)
- * @returns {Promise<void>}
+ * Quotes a value for a POSIX shell (used to build the scripts sent to a remote
+ * machine over ssh).
+ * @param {String} value
+ * @returns {String}
  */
-export const executeCommand = async (command, timeout) => {
-  console.log(`Executing command: ${command}`);
+export const shQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
 
-  return new Promise((resolve, reject) => {
-    const childProcess = spawn(command, {
-      shell: true,
-      stdio: ["inherit", "pipe", "pipe"], // Inherit stdin, pipe stdout and stderr
-    });
-
-    let stdoutData = "";
-    let stderrData = "";
-
-    childProcess.stdout.on("data", (data) => {
-      stdoutData += data;
-      console.log(data.toString()); // Output stdout in real-time
-    });
-
-    childProcess.stderr.on("data", (data) => {
-      stderrData += data;
-      console.error(data.toString()); // Output stderr in real-time
-    });
-
-    childProcess.on("error", (error) => {
-      reject(error);
-    });
-
-    childProcess.on("close", (code) => {
-      if (code !== 0) {
-        reject({
-          code: code,
-          stderr: stderrData,
-          stdout: stdoutData,
-        });
-        return;
-      }
-
-      resolve({
-        stdout: stdoutData,
-        stderr: stderrData,
-        code: code,
-      });
-    });
-
-    if (timeout) {
-      setTimeout(() => {
-        resolve({
-          stdout: stdoutData,
-          stderr: stderrData,
-          code: null, // Indicate timeout with a null code
-        });
-      }, timeout);
-    }
-  });
+/**
+ * Formats a duration as "12s" / "3m 04s".
+ * @param {Number} ms
+ * @returns {String}
+ */
+export const formatDuration = (ms) => {
+  const total = Math.round(ms / 1000);
+  if (total < 60) return `${total}s`;
+  return `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, "0")}s`;
 };

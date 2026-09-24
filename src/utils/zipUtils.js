@@ -2,69 +2,63 @@ import JSZip from "jszip";
 import path from "path";
 import fs from "fs";
 import fsp from "fs/promises";
+import { pipeline } from "stream/promises";
 
-// Code from https://github.com/Stuk/jszip/issues/386
-
-/**
- * Compresses a folder into a zip file
- * @param {String} srcDir
- * @param {String} destFile
- */
-export const compressFolder = async (srcDir, destFile) => {
-  console.log("Compressing folder", srcDir, "to", destFile);
-  const start = Date.now();
-  try {
-    const zip = await createZipFromFolder(srcDir);
-
-    // Await the end of the async zip generation
-    await zip.generateAsync({ type: "nodebuffer" }).then((content) => {
-      // Once the zip is async generated, save it to disk
-      fs.writeFileSync(destFile, content);
-    });
-
-    console.log("Zip written successfully:", Date.now() - start, "ms");
-  } catch (ex) {
-    console.error("Error creating zip", ex);
-  }
-};
+// Folders that are never needed on the target: dependencies and VCS data are
+// rebuilt/ignored by the Docker builds. (Note: *.zip is NOT excluded, the
+// generated importer ships its data as zipped shapefiles.)
+export const DEFAULT_EXCLUDES = ["node_modules", ".git", ".gradle"];
 
 /**
- * Returns a flat array of absolute paths of all files recursively contained in the dir
+ * Returns the files below `dir` as paths relative to it (posix separators).
  * @param {String} dir
+ * @param {String[]} excludes Directory/file names to skip at any depth
+ * @param {String} [prefix]
  * @returns {Promise<String[]>}
  */
-const getFilePathsRecursively = async (dir) => {
-  // returns a flat array of absolute paths of all files recursively contained in the dir
-  const list = await fsp.readdir(dir);
-  const statPromises = list.map(async (file) => {
-    const fullPath = path.resolve(dir, file);
-    const stat = await fsp.stat(fullPath);
-    if (stat && stat.isDirectory()) {
-      return getFilePathsRecursively(fullPath);
-    }
-    return fullPath;
+export const listFiles = async (
+  dir,
+  excludes = DEFAULT_EXCLUDES,
+  prefix = "",
+) => {
+  const entries = await fsp.readdir(path.join(dir, prefix), {
+    withFileTypes: true,
   });
-
-  return (await Promise.all(statPromises)).flat(Infinity);
+  const files = [];
+  for (const entry of entries) {
+    if (excludes.includes(entry.name)) continue;
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      files.push(...(await listFiles(dir, excludes, relative)));
+    } else if (entry.isFile()) {
+      files.push(relative);
+    }
+  }
+  return files;
 };
 
 /**
- * Creates a zip file from a folder
- * @param {String} dir
- * @returns {Promise<JSZip>}
+ * Compresses a folder into a zip file, streaming to disk (the whole archive is
+ * never held in memory). Errors propagate to the caller.
+ * @param {String} srcDir
+ * @param {String} destFile
+ * @param {Object} [opts]
+ * @param {String[]} [opts.excludes]
+ * @returns {Promise<{files: Number, bytes: Number}>}
  */
-const createZipFromFolder = async (dir) => {
-  const absRoot = path.resolve(dir);
-  const filePaths = await getFilePathsRecursively(dir);
-  return filePaths.reduce((z, filePath) => {
-    const relative = filePath.replace(absRoot, "");
-    // create folder trees manually :(
-    const zipFolder = path
-      .dirname(relative)
-      .split(path.sep)
-      .reduce((zf, dirName) => zf.folder(dirName), z);
+export const compressFolder = async (srcDir, destFile, opts = {}) => {
+  const { excludes = DEFAULT_EXCLUDES } = opts;
+  const files = await listFiles(srcDir, excludes);
 
-    zipFolder.file(path.basename(filePath), fs.createReadStream(filePath));
-    return z;
-  }, new JSZip());
+  const zip = new JSZip();
+  for (const relative of files) {
+    zip.file(relative, fs.createReadStream(path.join(srcDir, relative)));
+  }
+
+  await pipeline(
+    zip.generateNodeStream({ streamFiles: true, compression: "DEFLATE" }),
+    fs.createWriteStream(destFile),
+  );
+
+  return { files: files.length, bytes: (await fsp.stat(destFile)).size };
 };

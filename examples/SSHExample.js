@@ -7,11 +7,20 @@ const config = {
   host: "127.0.0.1",
   port: 22,
   username: "vboxuser",
-  certRoute: "../id_rsa", // Optional but recommended
+  certRoute: "../id_rsa",
   repoPath: "../code",
   remoteRepoPath: "/home/vboxuser/code",
-  forceBuild: true,
+  projectName: "example",
 };
 
-// Upload code by SCP
-await uploader.uploadCode(config);
+// Packages the code, uploads it by SCP, installs Docker if needed and starts the stack
+const { url } = await uploader.deploy(config, {
+  onEvent: (event) => {
+    if (event.type === "step") {
+      console.log(
+        `[${event.index}/${event.total}] ${event.label}: ${event.status}`,
+      );
+    }
+  },
+});
+console.log(`Deployed at ${url}`);

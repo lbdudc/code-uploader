@@ -1,16 +1,14 @@
 # Code Uploader
 
 ![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)
-![Node.js Version](https://img.shields.io/badge/node-%3E%3D%2012.0.0-brightgreen.svg)
+![Node.js Version](https://img.shields.io/badge/node-%3E%3D%2018.0.0-brightgreen.svg)
 ![npm version](https://badge.fury.io/js/code-uploader.svg)
 
 ## Description
 
-The **Code Uploader** is a versatile library designed to simplify the process of uploading code to a server and executing it via docker-compose. This library provides flexible strategies to facilitate code deployment across different environments, such as SSH-based servers, AWS instances, and local setups.
+The **Code Uploader** is a library that uploads a generated application to a machine and runs it with Docker Compose, reporting progress step by step. It has strategies for a local Docker, any SSH server (Debian/Ubuntu, and RPM based distros) and AWS EC2 instances.
 
 ## Installation
-
-Install the package via npm:
 
 ```bash
 npm install @lbdudc/gp-code-uploader
@@ -18,116 +16,98 @@ npm install @lbdudc/gp-code-uploader
 
 ## Pre-requisites
 
-- Have installed in your machine:
-  - [Node.js](https://nodejs.org/en/download/)
-  - [SSH](https://www.ssh.com/ssh/command/)
+- [Node.js](https://nodejs.org/en/download/) 18+
+- An OpenSSH client (`ssh`, `scp`) on the machine that deploys (SSH/AWS strategies)
+- **Local**: Docker with the compose plugin (Docker Desktop or Docker Engine)
+- **SSH**: a user with passwordless `sudo` (only needed the first time, to install Docker) and key based authentication. Password prompts are never shown: the connection fails fast instead of hanging.
 
-- Must be a root user or have sudo privileges in the server where you want to upload the code
-
-## Known Issues :warning:
-
-In AWS instances, the docker-compose up command can fail with the basic EC2 free tier instance. This is because the instance does not have enough memory to run the docker-compose up command. To solve this, you can use a bigger instance
-
-## Example Usages
-
-More examples can be found in the `./examples` folder.
-
-### SSH (Debian/Ubuntu)
-
-SSH Usage Example
+## Usage
 
 ```js
-import { Uploader, DebianUploadStrategy } from '@lbdudc/gp-code-uploader';
+import { Uploader, DebianUploadStrategy } from "@lbdudc/gp-code-uploader";
 
 const uploader = new Uploader();
 uploader.setUploadStrategy(new DebianUploadStrategy());
 
-const config = {
-    host: '127.0.0.1',
+const { url } = await uploader.deploy(
+  {
+    host: "203.0.113.5",
     port: 22,
-    username: 'root',
-    certRoute: '/home/certs/id_rsa', // Optional but recommended
-    repoPath: 'code/lps/output',
-    remoteRepoPath: '/home/username/code',
-    forceBuild: true, // default false
-};
-
-// Upload code, configure the instance and run docker-compose up
-await uploader.uploadCode(config);
+    username: "ubuntu",
+    certRoute: "/home/me/.ssh/id_ed25519",
+    repoPath: "./output", // generated app: must contain deploy/docker-compose.yml
+    remoteRepoPath: "/home/ubuntu/app", // absolute path, wiped on every deploy
+    // projectName: "my-app", // optional: compose project name (default: COMPOSE_PROJECT_NAME
+    //                        // from deploy/.env, else the folder name "deploy")
+  },
+  {
+    onEvent: (event) => console.log(event),
+    // signal: abortController.signal, // cancel a running deployment
+  },
+);
+console.log(`Deployed at ${url}`);
 ```
 
-### AWS
+`deploy()` resolves once **every service is ready**: healthy when it has a healthcheck, running otherwise, or exited with code 0 for one-shot services (importers, init containers). If a service fails or does not get ready in 10 minutes the promise rejects with that service's last log lines.
 
-<details>
-<summary>AWS Usage Example</summary>
+### Strategies
+
+| Strategy | Steps |
+| --- | --- |
+| `LocalUploadStrategy` | Check Docker, stop previous deployment, build & start services, wait for services |
+| `DebianUploadStrategy` | Package code, connect to server, prepare server (installs Docker if missing), stop previous deployment, upload code, build & start services, wait for services |
+| `AWSUploadStrategy` | *Create AWS instance* (skipped when `host` is given), then the same steps as SSH. Retries the first connection while the instance boots |
+
+### Configuration
+
+| Key | Used by | Description |
+| --- | --- | --- |
+| `repoPath` | all | Folder of the generated app (contains `deploy/docker-compose.yml`) |
+| `projectName` | all | Optional compose project name (`-p`). Without it compose uses `COMPOSE_PROJECT_NAME` from `deploy/.env`, else the folder name. Set it when several apps share the same folder name |
+| `url` | all | URL returned as the result (default `http://localhost` / `http://<host>`) |
+| `host`, `port`, `username`, `certRoute` | ssh, aws | SSH target and key |
+| `remoteRepoPath` | ssh, aws | Absolute remote folder (validated: no `..`, spaces or quotes) |
+| `AWS_*` | aws | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_AMI_ID`, `AWS_INSTANCE_TYPE`, `AWS_INSTANCE_NAME`, `AWS_SECURITY_GROUP_ID`, `AWS_KEY_NAME`. `AWS_USERNAME`, `AWS_SSH_PRIVATE_KEY_PATH` and `REMOTE_REPO_PATH` are accepted as aliases of `username`, `certRoute` and `remoteRepoPath` |
+
+### Events
+
+`onEvent` receives objects like:
 
 ```js
-import { Uploader, AWSUploadStrategy } from '@lbdudc/gp-code-uploader';
-
-// Create the uploader
-const uploader = new Uploader();
-
-// Set the upload strategy
-uploader.setUploadStrategy(new AWSUploadStrategy());
-
-// Create AWS instance
-const hostIp = await uploader.createInstance({
-    AWS_SECRET_ACCESS_KEY: '',
-    AWS_REGION: 'eu-west-2',
-    AWS_AMI_ID: 'ami-08b064b1296caf3b2',
-    AWS_INSTANCE_TYPE: 't2.micro',
-    AWS_INSTANCE_NAME: 'my-aws-instance',
-    AWS_SECURITY_GROUP_ID: 'sg-xxxxxxxxxxxxxxxxx',
-    AWS_KEY_NAME: 'my-key-pair',
-    AWS_USERNAME: 'ec2-user',
-    AWS_SSH_PRIVATE_KEY_PATH:'./my-key-pair.pem',
-    AWS_ACCESS_KEY_ID: '',
-});
-
-// Upload code by SCP, configure instance, and run docker-compose up
-await uploader.uploadCode({
-    host: hostIp,
-    username: 'ec2-user',
-    certRoute: './my-key-pair.pem',
-    awsRegion: 'eu-west-2',
-    repoPath: '../code',
-    remoteRepoPath: `/home/ec2-user/code`,
-    // forceBuild: true,
-});
+{ type: "step", id: "upload", label: "Upload code", status: "running", index: 5, total: 7 }
+{ type: "step", id: "upload", label: "Upload code", status: "done", index: 5, total: 7, durationMs: 8123 }
+{ type: "log", step: "build", line: "#12 [server 4/6] RUN ./gradlew build" }
+{ type: "services", services: [{ name: "server", state: "running", health: "starting", status: "pending" }] }
 ```
 
-</details>
+`status` of a step is `running`, `done`, `skipped` or `failed`. A failed step also sets `error.step` on the rejected error. Without `onEvent`, progress is printed to the console.
 
-## Methods
+### Errors
 
-`uploader.js` exposes the following methods:
+Every failure rejects `deploy()`. Errors from commands are `CommandError`s (`command`, `code`, `stderr`, `tail(n)`). Aborting the `signal` kills the running command.
 
-- `uploadCode(options): Promise<UploadCodeResponse>`: Uploads the code, configures the instance and runs docker-compose up
+## Migrating from 1.x
+
+- `uploadCode(config)` still works (console output, resolves to the URL); prefer `deploy(config, { onEvent })`.
+- `forceBuild` is **removed**: the client and server are built inside Docker, so nothing is built on the machine that deploys.
+- `Uploader.executeCommand` and the strategy hooks `configureInstance` / `runDockerComposeUp` are removed.
+- `docker-compose` v1 is only used as a fallback; `docker compose` is preferred.
+- Commands run without a shell and with `BatchMode=yes`: a key that needs a passphrase must be loaded in an ssh-agent.
+- The remote folder is emptied on every deploy, and must be an absolute path at least two levels deep.
 
 ## AWS Instance Pre-requisites
 
-You need to create an AWS instance with the following:
-
 - An SSH key pair [guide](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/create-key-pairs.html)
-- A security group with the following inbound rules: [guide](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-security-groups.html?icmpid=docs_ec2_console#creating-security-group)
-  - SSH (port 22) from your IP (or the IP of the server you want to access the instance from)
-  - HTTP (port 80) from your IP (or the IP of the server you want to access the instance from)
-- A security group with the following outboud rules: [guide](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-security-groups.html?icmpid=docs_ec2_console#creating-security-group)
-  - All traffic (all ports) to your IP (or the IP of the server you want to access the instance from)
-- An IAM role with the following permissions: [guide](https://docs.aws.amazon.com/singlesignon/latest/userguide/what-is.html?icmpid=docs_console_unmapped)
-  - AmazonEC2FullAccess
-- Get your AWS access key and secret key: [guide](https://docs.aws.amazon.com/general/latest/gr/aws-sec-cred-types.html#access-keys-and-secret-access-keys)
+- A security group with inbound SSH (22) and HTTP (80) [guide](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-security-groups.html)
+- IAM permissions to run instances (e.g. `AmazonEC2FullAccess`) and your access/secret key [guide](https://docs.aws.amazon.com/general/latest/gr/aws-sec-cred-types.html#access-keys-and-secret-access-keys)
+- An instance with enough memory: the build fails on the smallest free tier instances
 
-## Dependencies
+## Development
 
-- **@aws-sdk/client-ec2**: ^3.32.0
-- **dotenv**: ^16.0.3
-- **jszip**: ^3.10.1
-
-## Dev Dependencies
-
-- **@vitest/coverage-istanbul**: ^0.32.2
-- **vitest**: ^0.32.0
+```bash
+npm test        # unit tests, no Docker/SSH needed
+npm run lint
+```
 
 ## Author
 
@@ -136,4 +116,4 @@ Email: <victor.lamas@udc.es>
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details
