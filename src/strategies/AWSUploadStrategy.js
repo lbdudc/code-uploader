@@ -57,6 +57,7 @@ class AWSUploadStrategy extends RemoteStrategy {
     const {
       AWS_ACCESS_KEY_ID,
       AWS_SECRET_ACCESS_KEY,
+      AWS_SESSION_TOKEN,
       AWS_REGION,
       AWS_INSTANCE_NAME,
       AWS_INSTANCE_TYPE,
@@ -65,12 +66,19 @@ class AWSUploadStrategy extends RemoteStrategy {
       AWS_SECURITY_GROUP_ID,
     } = config;
 
+    // Keys in the config are used as they are. Without them the SDK finds credentials
+    // by itself: AWS_* variables, a profile (AWS_PROFILE), SSO, an instance role.
+    const credentials =
+      AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY
+        ? {
+            accessKeyId: AWS_ACCESS_KEY_ID,
+            secretAccessKey: AWS_SECRET_ACCESS_KEY,
+            ...(AWS_SESSION_TOKEN ? { sessionToken: AWS_SESSION_TOKEN } : {}),
+          }
+        : undefined;
     const client = this._ec2Factory({
       region: AWS_REGION,
-      credentials: {
-        accessKeyId: AWS_ACCESS_KEY_ID,
-        secretAccessKey: AWS_SECRET_ACCESS_KEY,
-      },
+      ...(credentials ? { credentials } : {}),
     });
 
     const { Instances } = await client.send(

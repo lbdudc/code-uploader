@@ -1,7 +1,7 @@
 import os from "os";
 import fs from "fs";
 import path from "path";
-import UploadStrategy from "./UploadStrategy.js";
+import UploadStrategy, { IMPORTER_SERVICE } from "./UploadStrategy.js";
 import { SSHClient } from "../ssh.js";
 import { assertRemoteConfig } from "../config.js";
 import { compressFolder, hashFolder } from "../utils/zipUtils.js";
@@ -243,6 +243,18 @@ class RemoteStrategy extends UploadStrategy {
       await ssh.exec(PROVISION_SCRIPT, { ...opts, onLine: (l) => ctx.log(l) });
     }
 
+    await this._detectCompose(ctx);
+
+    return ready
+      ? { skipped: true, detail: "Docker already installed" }
+      : undefined;
+  }
+
+  /** Finds how to run docker compose on the server (with or without sudo), or fails. */
+  async _detectCompose(ctx) {
+    const ssh = this._ssh(ctx);
+    const opts = { signal: ctx.signal };
+
     // A group added just now is not active in this session: fall back to sudo
     let sudo = false;
     try {
@@ -265,10 +277,77 @@ class RemoteStrategy extends UploadStrategy {
     );
     if (!ctx.state.prefix)
       throw new Error("Docker Compose is not available on the server.");
+  }
 
-    return ready
-      ? { skipped: true, detail: "Docker already installed" }
-      : undefined;
+  /** An update reloads data of an app that is there: nothing to update on an empty folder. */
+  async _assertDeployed(ctx) {
+    const composeFile = `${ctx.config.remoteRepoPath}/deploy/docker-compose.yml`;
+    const { stdout } = await this._ssh(ctx).exec(
+      `[ -f ${shQuote(composeFile)} ] && echo YES || echo NO`,
+      { signal: ctx.signal },
+    );
+    if (!stdout.includes("YES")) {
+      throw new Error(
+        `Nothing is deployed in ${ctx.config.remoteRepoPath} on the server: deploy the app first.`,
+      );
+    }
+  }
+
+  _planUpdate() {
+    return [
+      {
+        id: "connect",
+        label: "Connect to server",
+        run: (ctx) => this._connect(ctx),
+      },
+      {
+        id: "check",
+        label: "Check the app",
+        run: async (ctx) => {
+          await this._detectCompose(ctx);
+          await this._assertDeployed(ctx);
+        },
+      },
+      {
+        id: "package",
+        label: "Package data",
+        run: (ctx) => this._package(ctx),
+      },
+      { id: "upload", label: "Upload data", run: (ctx) => this._upload(ctx) },
+      {
+        id: "import",
+        label: "Load the data",
+        run: (ctx) => this._runImporter(ctx),
+      },
+      {
+        id: "wait",
+        label: "Wait for the import",
+        run: (ctx) => this._waitImporter(ctx),
+      },
+    ];
+  }
+
+  async _runImporter(ctx) {
+    const compose = this._compose(ctx, ctx.config.projectName);
+    const missing = await compose.notRunning(["server"]);
+    if (missing.length > 0) {
+      throw new Error(
+        "The app is not running on the server: deploy it first (updating the data needs the running server).",
+      );
+    }
+    await compose.up({
+      services: [IMPORTER_SERVICE],
+      build: false,
+      onLine: (l) => ctx.log(l),
+    });
+  }
+
+  async _waitImporter(ctx) {
+    await this._compose(ctx, ctx.config.projectName).waitForServices({
+      services: [IMPORTER_SERVICE],
+      signal: ctx.signal,
+      onStatus: (services) => ctx.emit({ type: "services", services }),
+    });
   }
 
   async _stopPrevious(ctx) {

@@ -110,8 +110,16 @@ export class Compose {
    * explicitly: the generated Dockerfiles use cache mounts (npm, gradle), which the
    * legacy `docker-compose` binary only honours with these two variables.
    */
-  up(opts = {}) {
-    return this._exec(this._argv(["up", "-d", "--build", "--remove-orphans"]), {
+  up({ services = [], build = true, ...opts } = {}) {
+    // `services` narrows `up` to those services alone (their dependencies are not
+    // started: they must already run); they are recreated even when nothing changed
+    const only = services.length > 0;
+    const flags = [
+      "-d",
+      ...(build ? ["--build"] : []),
+      ...(only ? ["--no-deps", "--force-recreate"] : ["--remove-orphans"]),
+    ];
+    return this._exec(this._argv(["up", ...flags, ...services]), {
       ...opts,
       env: { ...BUILDKIT_ENV, ...opts.env },
     });
@@ -135,6 +143,16 @@ export class Compose {
       this._argv(["ps", "-a", "--format", "json"]),
     );
     return parsePs(stdout);
+  }
+
+  /**
+   * The names among `names` that are not running (or don't exist) right now.
+   * @param {String[]} names
+   * @returns {Promise<String[]>}
+   */
+  async notRunning(names) {
+    const running = new Set((await this.ps()).filter((s) => s.state === "running").map((s) => s.name));
+    return names.filter((name) => !running.has(name));
   }
 
   async logs(service, tail = 30) {
@@ -180,6 +198,7 @@ export class Compose {
    * @param {(services: Array) => void} [opts.onStatus]
    * @param {AbortSignal} [opts.signal]
    * @param {(ms: Number) => Promise<void>} [opts.sleepFn] Injected for tests
+   * @param {String[]} [opts.services] Only wait for these services (by name)
    * @returns {Promise<Array>} the final service list
    */
   async waitForServices({
@@ -188,6 +207,7 @@ export class Compose {
     onStatus,
     signal,
     sleepFn = sleep,
+    services,
   } = {}) {
     const deadline = Date.now() + timeoutMs;
     let last = [];
@@ -196,7 +216,10 @@ export class Compose {
       if (signal?.aborted) throw new Error("Aborted");
 
       last = await this.ps();
-      const report = last.map((s) => ({ ...s, status: classify(s) }));
+      // `services` (names) narrows the wait to those: the rest of the stack is not this
+      // operation's concern
+      const watched = services ? last.filter((s) => services.includes(s.name)) : last;
+      const report = watched.map((s) => ({ ...s, status: classify(s) }));
       if (onStatus) onStatus(report);
 
       const failed = report.filter((s) => s.status === "failed");

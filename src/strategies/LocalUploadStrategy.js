@@ -4,6 +4,7 @@ import UploadStrategy from "./UploadStrategy.js";
 import { run } from "../utils/exec.js";
 import { getAbsolutePath } from "../utils/utils.js";
 import { Compose } from "../docker/compose.js";
+import { IMPORTER_SERVICE } from "./UploadStrategy.js";
 
 /**
  * Runs the generated stack with the Docker installation of this machine.
@@ -33,6 +34,53 @@ class LocalUploadStrategy extends UploadStrategy {
       },
       { id: "wait", label: "Wait for services", run: (ctx) => this._wait(ctx) },
     ];
+  }
+
+  _planUpdate() {
+    return [
+      {
+        id: "docker",
+        label: "Check Docker",
+        run: (ctx) => this._checkDocker(ctx),
+      },
+      {
+        id: "import",
+        label: "Load the data",
+        run: (ctx) => this._runImporter(ctx),
+      },
+      {
+        id: "wait",
+        label: "Wait for the import",
+        run: (ctx) => this._waitImporter(ctx),
+      },
+    ];
+  }
+
+  async _runImporter(ctx) {
+    const compose = this._composeFor(ctx);
+    const missing = await compose.notRunning([IMPORTER_SERVICE, "server"]);
+    if (missing.includes("server")) {
+      throw new Error(
+        "The app is not running: deploy it first (updating the data needs the running server).",
+      );
+    }
+    if (missing.includes(IMPORTER_SERVICE) === false) {
+      // it exists and runs (an import in progress): let it finish, then run it again
+      ctx.log("A data import is still running: it is restarted.");
+    }
+    await compose.up({
+      services: [IMPORTER_SERVICE],
+      build: false,
+      onLine: (line) => ctx.log(line),
+    });
+  }
+
+  async _waitImporter(ctx) {
+    await this._composeFor(ctx).waitForServices({
+      services: [IMPORTER_SERVICE],
+      signal: ctx.signal,
+      onStatus: (services) => ctx.emit({ type: "services", services }),
+    });
   }
 
   resolveUrl(config) {

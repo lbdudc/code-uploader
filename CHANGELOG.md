@@ -1,5 +1,13 @@
 # Changelog
 
+
+## 2.2.0
+
+### Added
+- `updateData(config, opts)` (also on `Uploader`, with `describeUpdate`): loads new data into a stack that is already running by recreating only the `data-importer` service (no `down`, no build, no restart of the rest). Local and ssh/aws deployments; it fails with a clear message when the app is not deployed or not running.
+- `Compose.up({ services, build })` recreates just those services (`--no-deps --force-recreate`), `Compose.waitForServices({ services })` waits only for them, and `Compose.notRunning(names)`.
+- AWS: without `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` in the config the SDK's own credential chain is used (environment, `AWS_PROFILE`, SSO); `AWS_SESSION_TOKEN` is accepted alongside the keys.
+
 ## 2.1.0
 
 ### Changed

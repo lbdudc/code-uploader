@@ -42,6 +42,9 @@ export const consoleReporter = (event) => {
  * returning the ordered steps; this class runs them, reports progress and
  * guarantees that a failing step aborts the deployment.
  */
+/** The compose service that loads the data (see the generated docker-compose.yml). */
+export const IMPORTER_SERVICE = "data-importer";
+
 class UploadStrategy {
   /**
    * @param {Object} config
@@ -83,9 +86,43 @@ class UploadStrategy {
    * @param {AbortSignal} [opts.signal] Aborting stops the running command
    * @returns {Promise<{url: String|null}>}
    */
-  async deploy(config, { onEvent = consoleReporter, signal } = {}) {
+  async deploy(config, opts = {}) {
     const normalized = normalizeConfig(config);
-    const steps = this.plan(normalized);
+    return this._runSteps(this.plan(normalized), normalized, opts);
+  }
+
+  /**
+   * The steps `updateData` will run. Only local and ssh deployments can do it (an update
+   * reloads the data of a stack that is already running).
+   * @param {Object} config
+   * @returns {Array<{id: String, label: String}>}
+   */
+  describeUpdate(config) {
+    return this._planUpdate(normalizeConfig(config)).map(({ id, label }) => ({
+      id,
+      label,
+    }));
+  }
+
+  /**
+   * Loads new or changed data into the running stack: the data importer runs again (it
+   * only reloads the layers whose content changed), with no rebuild and no restart of
+   * the rest. Same `opts` and events as `deploy`.
+   * @param {Object} config
+   * @param {Object} [opts]
+   * @returns {Promise<{url: String|null}>}
+   */
+  async updateData(config, opts = {}) {
+    const normalized = normalizeConfig(config);
+    return this._runSteps(this._planUpdate(normalized), normalized, opts);
+  }
+
+  // eslint-disable-next-line no-unused-vars
+  _planUpdate(config) {
+    throw new Error("This deployment type cannot update the data of a running stack");
+  }
+
+  async _runSteps(steps, normalized, { onEvent = consoleReporter, signal } = {}) {
     const state = {};
     const cleanups = [];
     let current = null;
