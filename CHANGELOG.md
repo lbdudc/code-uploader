@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.1.0
+
+### Changed
+- A redeploy no longer runs `docker compose down -v`: the named volumes (the database) survive. Pass `resetData: true` in the config to get the old behaviour (an empty database).
+- `docker compose up` runs with `DOCKER_BUILDKIT=1` / `COMPOSE_DOCKER_CLI_BUILD=1`, so the Dockerfiles' cache mounts also work with the legacy `docker-compose` binary.
+- SSH/AWS deployments upload incrementally: the server keeps a `.gp-manifest.json` (SHA-256 per file) and only new or changed files are zipped and sent; deleted files are removed and the remote folder is no longer wiped. A first deploy, or one whose manifest is missing (an interrupted upload leaves none), still sends everything.
+- Already compressed files (`.zip`, `.tif`, images, jars...) are stored in the package instead of deflated again.
+- The steps of an ssh/aws deploy are now: connect, prepare, package, stop, upload, build, wait (the package needs the server's manifest).
+
+### Added
+- Services labelled `gp.oneshot=true` in the compose file (the generated data importer) are pending while they run and ready once they exit 0, so the deploy only finishes after the data is loaded. Before, a running container without a healthcheck counted as ready.
+- `resetData` config option, `hashFolder()` in `zipUtils`, `compressFolder({ files })`.
+
 ## 2.0.0
 
 ### Added

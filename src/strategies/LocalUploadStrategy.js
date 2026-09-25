@@ -86,7 +86,10 @@ class LocalUploadStrategy extends UploadStrategy {
 
   async _stopPrevious(ctx) {
     try {
-      await this._composeFor(ctx).down({ onLine: (line) => ctx.log(line) });
+      await this._composeFor(ctx).down({
+        volumes: !!ctx.config.resetData,
+        onLine: (line) => ctx.log(line),
+      });
     } catch (error) {
       ctx.log(
         `(ignored) could not stop the previous deployment: ${error.message}`,

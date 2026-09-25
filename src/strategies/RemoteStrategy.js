@@ -4,7 +4,7 @@ import path from "path";
 import UploadStrategy from "./UploadStrategy.js";
 import { SSHClient } from "../ssh.js";
 import { assertRemoteConfig } from "../config.js";
-import { compressFolder } from "../utils/zipUtils.js";
+import { compressFolder, hashFolder } from "../utils/zipUtils.js";
 import { getAbsolutePath, shQuote, formatDuration } from "../utils/utils.js";
 import { Compose } from "../docker/compose.js";
 
@@ -28,11 +28,38 @@ fi
 sudo systemctl enable --now docker >/dev/null 2>&1 || sudo service docker start
 sudo usermod -aG docker "$USER" || true`;
 
+/**
+ * argv as a shell command that runs with `env` set on the server. Through sudo the
+ * variables have to go after it (`sudo env K=V cmd`): sudo resets the environment.
+ */
+export const withRemoteEnv = (argv, env = {}) => {
+  const assignments = Object.entries(env).map(([k, v]) => `${k}=${v}`);
+  if (assignments.length === 0) return argv.map(shQuote).join(" ");
+  const sudo = argv[0] === "sudo" ? argv.slice(0, 1) : [];
+  return [...sudo, "env", ...assignments, ...argv.slice(sudo.length)]
+    .map(shQuote)
+    .join(" ");
+};
+
 const INSTALL_UNZIP = `command -v unzip >/dev/null 2>&1 || {
   if command -v apt-get >/dev/null 2>&1; then sudo apt-get update -qq && sudo apt-get install -y -qq unzip;
   elif command -v dnf >/dev/null 2>&1; then sudo dnf install -y unzip;
   else sudo yum install -y unzip; fi
 }`;
+
+/**
+ * What the server holds from the previous deploy (relative path -> SHA-256), written after
+ * every complete upload. Its absence (first deploy, or an upload that was interrupted)
+ * means a full upload.
+ */
+const MANIFEST_NAME = ".gp-manifest.json";
+
+/** Paths taken from the remote manifest go into `rm`: only plain relative ones. */
+const isSafeRelativePath = (p) =>
+  typeof p === "string" &&
+  p.length > 0 &&
+  !p.startsWith("/") &&
+  !p.split("/").includes("..");
 
 /**
  * Deploys over ssh to a Linux machine with Docker (installed on demand).
@@ -59,11 +86,6 @@ class RemoteStrategy extends UploadStrategy {
     return [
       ...this.preSteps(),
       {
-        id: "package",
-        label: "Package code",
-        run: (ctx) => this._package(ctx),
-      },
-      {
         id: "connect",
         label: "Connect to server",
         run: (ctx) => this._connect(ctx),
@@ -72,6 +94,11 @@ class RemoteStrategy extends UploadStrategy {
         id: "prepare",
         label: "Prepare server",
         run: (ctx) => this._prepare(ctx),
+      },
+      {
+        id: "package",
+        label: "Package code",
+        run: (ctx) => this._package(ctx),
       },
       {
         id: "stop",
@@ -114,8 +141,8 @@ class RemoteStrategy extends UploadStrategy {
   _remoteExec(ctx) {
     const ssh = this._ssh(ctx);
     const dir = this._deployDir(ctx);
-    return (argv, opts = {}) =>
-      ssh.exec(`cd ${shQuote(dir)} && ${argv.map(shQuote).join(" ")}`, {
+    return (argv, { env, ...opts } = {}) =>
+      ssh.exec(`cd ${shQuote(dir)} && ${withRemoteEnv(argv, env)}`, {
         signal: ctx.signal,
         ...opts,
       });
@@ -130,20 +157,59 @@ class RemoteStrategy extends UploadStrategy {
     });
   }
 
+  /** The manifest of the previous deploy, or null when it can't be trusted. */
+  async _readRemoteManifest(ctx) {
+    const file = shQuote(`${ctx.config.remoteRepoPath}/${MANIFEST_NAME}`);
+    try {
+      const { stdout } = await this._ssh(ctx).exec(
+        `cat ${file} 2>/dev/null || true`,
+        { signal: ctx.signal },
+      );
+      const files = JSON.parse(stdout).files;
+      return files && typeof files === "object" ? files : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Zips only what differs from the server's copy (first deploy: everything), so a
+   * redeploy sends the few changed files instead of hundreds of MB of unchanged data.
+   */
   async _package(ctx) {
     const source = getAbsolutePath(ctx.config.repoPath);
     if (!fs.existsSync(source)) throw new Error(`Folder not found: ${source}`);
 
-    const zipName = `${path.basename(source)}-${Date.now()}.zip`;
-    const zipPath = path.join(os.tmpdir(), zipName);
-    ctx.state.zipPath = zipPath;
-    ctx.state.zipName = zipName;
-    ctx.onCleanup(() => fs.rmSync(zipPath, { force: true }));
-
     const started = Date.now();
-    const { files, bytes } = await compressFolder(source, zipPath);
+    const local = await hashFolder(source);
+    const remote = await this._readRemoteManifest(ctx);
+
+    const changed = Object.keys(local).filter(
+      (file) => !remote || remote[file] !== local[file],
+    );
+    ctx.state.manifest = { version: 1, files: local };
+    ctx.state.incremental = !!remote;
+    ctx.state.removed = remote
+      ? Object.keys(remote).filter((file) => !(file in local))
+      : [];
+    ctx.state.zipPath = null;
+
+    let bytes = 0;
+    if (changed.length > 0) {
+      const zipName = `${path.basename(source)}-${Date.now()}.zip`;
+      const zipPath = path.join(os.tmpdir(), zipName);
+      ctx.state.zipPath = zipPath;
+      ctx.state.zipName = zipName;
+      ctx.onCleanup(() => fs.rmSync(zipPath, { force: true }));
+      ({ bytes } = await compressFolder(source, zipPath, { files: changed }));
+    }
+
     ctx.log(
-      `${files} files, ${(bytes / 1024 / 1024).toFixed(1)} MB in ${formatDuration(Date.now() - started)}`,
+      `${remote ? "Incremental" : "Full"} upload: ${changed.length} of ${Object.keys(local).length} files ` +
+        `(${(bytes / 1024 / 1024).toFixed(1)} MB) in ${formatDuration(Date.now() - started)}` +
+        (ctx.state.removed.length
+          ? `, ${ctx.state.removed.length} removed`
+          : ""),
     );
   }
 
@@ -219,7 +285,10 @@ class RemoteStrategy extends UploadStrategy {
     // Named project (this version) and the default one (deployments made by 1.x)
     for (const name of new Set([ctx.config.projectName, undefined])) {
       try {
-        await this._compose(ctx, name).down({ onLine: (l) => ctx.log(l) });
+        await this._compose(ctx, name).down({
+          volumes: !!ctx.config.resetData,
+          onLine: (l) => ctx.log(l),
+        });
       } catch (error) {
         ctx.log(`(ignored) ${error.tail?.(2) || error.message}`);
       }
@@ -230,19 +299,47 @@ class RemoteStrategy extends UploadStrategy {
     const ssh = this._ssh(ctx);
     const dir = shQuote(ctx.config.remoteRepoPath);
     const opts = { signal: ctx.signal };
+    const { incremental, manifest, zipPath, zipName } = ctx.state;
+    const manifestFile = `"$DIR"/${MANIFEST_NAME}`;
+
+    // The manifest goes first, and is written back only once everything is in place: an
+    // interrupted upload leaves none, so the next deploy sends everything again.
+    const removals = ctx.state.removed
+      .filter(isSafeRelativePath)
+      .map((file) => shQuote(file));
+    const prepare = incremental
+      ? [
+          `DIR=${dir}`,
+          `mkdir -p "$DIR" 2>/dev/null || { sudo mkdir -p "$DIR" && sudo chown "$USER" "$DIR"; }`,
+          `rm -f ${manifestFile}`,
+          // in batches: a long list would overflow the command line
+          ...Array.from(
+            { length: Math.ceil(removals.length / 100) },
+            (_, i) =>
+              `(cd "$DIR" && rm -f -- ${removals.slice(i * 100, i * 100 + 100).join(" ")})`,
+          ),
+        ]
+      : [
+          `DIR=${dir}`,
+          `mkdir -p "$DIR" 2>/dev/null || { sudo mkdir -p "$DIR" && sudo chown "$USER" "$DIR"; }`,
+          `find "$DIR" -mindepth 1 -delete 2>/dev/null || sudo find "$DIR" -mindepth 1 -delete`,
+        ];
+    if (zipPath) prepare.push(INSTALL_UNZIP);
+    await ssh.exec(prepare.join("\n"), opts);
+
+    if (zipPath) {
+      await ssh.upload(zipPath, ctx.config.remoteRepoPath, opts);
+      const zip = shQuote(`${ctx.config.remoteRepoPath}/${zipName}`);
+      await ssh.exec(`unzip -oq ${zip} -d ${dir} && rm -f ${zip}`, opts);
+    }
 
     await ssh.exec(
       `DIR=${dir}
-mkdir -p "$DIR" 2>/dev/null || { sudo mkdir -p "$DIR" && sudo chown "$USER" "$DIR"; }
-find "$DIR" -mindepth 1 -delete 2>/dev/null || sudo find "$DIR" -mindepth 1 -delete
-${INSTALL_UNZIP}`,
+cat > ${manifestFile} <<'GP_MANIFEST_EOF'
+${JSON.stringify(manifest)}
+GP_MANIFEST_EOF`,
       opts,
     );
-
-    await ssh.upload(ctx.state.zipPath, ctx.config.remoteRepoPath, opts);
-
-    const zip = shQuote(`${ctx.config.remoteRepoPath}/${ctx.state.zipName}`);
-    await ssh.exec(`unzip -oq ${zip} -d ${dir} && rm -f ${zip}`, opts);
   }
 
   async _up(ctx) {

@@ -64,6 +64,7 @@ console.log(`Deployed at ${url}`);
 | --- | --- | --- |
 | `repoPath` | all | Folder of the generated app (contains `deploy/docker-compose.yml`) |
 | `projectName` | all | Optional compose project name (`-p`). Without it compose uses `COMPOSE_PROJECT_NAME` from `deploy/.env`, else the folder name. Set it when several apps share the same folder name |
+| `resetData` | all | `true` deletes the previous deployment's volumes (`down -v`, i.e. the database) before starting. Default `false`: a redeploy keeps its data |
 | `url` | all | URL returned as the result (default `http://localhost` / `http://<host>`) |
 | `host`, `port`, `username`, `certRoute` | ssh, aws | SSH target and key |
 | `remoteRepoPath` | ssh, aws | Absolute remote folder (validated: no `..`, spaces or quotes) |

@@ -99,12 +99,21 @@ describe("docker compose helpers", () => {
 
   test("parsePs reads NDJSON (compose >= 2.21) and JSON arrays", () => {
     const expected = [
-      { name: "db", container: "app-db", state: "running", health: "healthy", exitCode: 0 },
-      { name: "importer", container: "app-importer", state: "exited", health: "", exitCode: 0 },
+      { name: "db", container: "app-db", state: "running", health: "healthy", exitCode: 0, oneshot: false },
+      { name: "importer", container: "app-importer", state: "exited", health: "", exitCode: 0, oneshot: false },
     ];
     expect(parsePs(ndjson)).toEqual(expected);
     expect(parsePs(`[${ndjson.split("\n").join(",")}]`)).toEqual(expected);
     expect(parsePs("")).toEqual([]);
+  });
+
+  test("parsePs flags services labelled gp.oneshot=true", () => {
+    const row = (Labels) => JSON.stringify({ Service: "i", Name: "i", State: "running", Labels });
+    expect(parsePs(row("a=b,gp.oneshot=true,c=d"))[0].oneshot).toBe(true);
+    expect(parsePs(row("gp.oneshot=true"))[0].oneshot).toBe(true);
+    expect(parsePs(row("a=b,gp.oneshot=false"))[0].oneshot).toBe(false);
+    expect(parsePs(row("x.gp.oneshot=true"))[0].oneshot).toBe(false);
+    expect(parsePs(row(undefined))[0].oneshot).toBe(false);
   });
 
   test.each([
@@ -116,6 +125,10 @@ describe("docker compose helpers", () => {
     [{ state: "exited", health: "", exitCode: 1 }, "failed"],
     [{ state: "restarting", health: "", exitCode: 0 }, "pending"],
     [{ state: "created", health: "", exitCode: 0 }, "pending"],
+    // a one-shot job is done when it exits, not while it runs
+    [{ state: "running", health: "", exitCode: 0, oneshot: true }, "pending"],
+    [{ state: "exited", health: "", exitCode: 0, oneshot: true }, "ready"],
+    [{ state: "exited", health: "", exitCode: 1, oneshot: true }, "failed"],
   ])("classify %j -> %s", (service, expected) => {
     expect(classify(service)).toBe(expected);
   });
@@ -171,8 +184,26 @@ describe("docker compose helpers", () => {
     const { compose, calls } = composeWith([]);
     await compose.up();
     await compose.down();
+    await compose.down({ volumes: true });
     expect(calls[0]).toEqual(["docker", "compose", "-p", "p", "up", "-d", "--build", "--remove-orphans"]);
-    expect(calls[1]).toEqual(["docker", "compose", "-p", "p", "down", "-v", "--remove-orphans"]);
+    // the database survives a redeploy unless the caller asks for `-v`
+    expect(calls[1]).toEqual(["docker", "compose", "-p", "p", "down", "--remove-orphans"]);
+    expect(calls[2]).toEqual(["docker", "compose", "-p", "p", "down", "-v", "--remove-orphans"]);
+  });
+
+  test("up asks for BuildKit (the Dockerfiles use cache mounts), down does not", async () => {
+    const envs = [];
+    const compose = new Compose({
+      exec: async (argv, opts = {}) => {
+        envs.push(opts.env);
+        return { stdout: "" };
+      },
+      prefix: ["docker", "compose"],
+    });
+    await compose.up({ env: { EXTRA: "1" } });
+    await compose.down();
+    expect(envs[0]).toEqual({ DOCKER_BUILDKIT: "1", COMPOSE_DOCKER_CLI_BUILD: "1", EXTRA: "1" });
+    expect(envs[1]).toBeUndefined();
   });
 
   test("detectPrefix falls back to docker-compose and sudo", async () => {

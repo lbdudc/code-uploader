@@ -1,6 +1,6 @@
 {
   "name": "@lbdudc/gp-code-uploader",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "homepage": "https://github.com/lbdudc/code-uploader.git",
   "description": "Code Uploader is a flexible library that simplifies uploading code to a server and executing it via docker-compose. This module offers various code distribution options for SSH-based servers, AWS instances, and local installations.",
   "main": "index.js",

@@ -53,6 +53,27 @@ describe("LocalUploadStrategy", () => {
     expect(events.some((e) => e.type === "services")).toBe(true);
   });
 
+  test("keeps the volumes on a redeploy, deletes them with resetData", async () => {
+    const runFn = fakeRun();
+    await new LocalUploadStrategy({ runFn }).deploy({ repoPath: repo, projectName: "demo" }, { onEvent: () => {} });
+    await new LocalUploadStrategy({ runFn }).deploy(
+      { repoPath: repo, projectName: "demo", resetData: true },
+      { onEvent: () => {} },
+    );
+    const lines = runFn.mock.calls.map(([c, a]) => [c, ...a].join(" "));
+    expect(lines).toContain("docker compose -p demo down --remove-orphans");
+    expect(lines).toContain("docker compose -p demo down -v --remove-orphans");
+  });
+
+  test("passes BuildKit to `up` only", async () => {
+    const runFn = fakeRun();
+    await new LocalUploadStrategy({ runFn }).deploy({ repoPath: repo, projectName: "demo" }, { onEvent: () => {} });
+    const up = runFn.mock.calls.find(([, a]) => a.includes("up"));
+    expect(up[2].env).toMatchObject({ DOCKER_BUILDKIT: "1", COMPOSE_DOCKER_CLI_BUILD: "1" });
+    const down = runFn.mock.calls.find(([, a]) => a.includes("down"));
+    expect(down[2].env).toBeUndefined();
+  });
+
   test("describe() lists the steps before running anything", () => {
     const runFn = fakeRun();
     expect(new LocalUploadStrategy({ runFn }).describe({ repoPath: repo })).toEqual([

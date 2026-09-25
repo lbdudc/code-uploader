@@ -8,10 +8,21 @@
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Compose services that run to completion carry the label `gp.oneshot=true`
+ * (`ps` prints all labels as `k=v,k=v`).
+ */
+const ONESHOT_LABEL = /(^|,)gp\.oneshot=true(,|$)/;
+
+export const BUILDKIT_ENV = {
+  DOCKER_BUILDKIT: "1",
+  COMPOSE_DOCKER_CLI_BUILD: "1",
+};
+
+/**
  * `docker compose ps --format json` prints a JSON array (compose < 2.21) or
  * one JSON object per line (newer versions).
  * @param {String} stdout
- * @returns {Array<{name: String, container: String, state: String, health: String, exitCode: Number}>}
+ * @returns {Array<{name: String, container: String, state: String, health: String, exitCode: Number, oneshot: Boolean}>}
  */
 export const parsePs = (stdout) => {
   const text = (stdout || "").trim();
@@ -33,19 +44,22 @@ export const parsePs = (stdout) => {
     state: String(row.State || "").toLowerCase(),
     health: String(row.Health || "").toLowerCase(),
     exitCode: Number(row.ExitCode ?? 0),
+    oneshot: ONESHOT_LABEL.test(String(row.Labels || "")),
   }));
 };
 
 /**
- * @param {{state: String, health: String, exitCode: Number}} service
+ * @param {{state: String, health: String, exitCode: Number, oneshot?: Boolean}} service
  * @returns {"ready"|"pending"|"failed"}
  */
-export const classify = ({ state, health, exitCode }) => {
+export const classify = ({ state, health, exitCode, oneshot }) => {
   if (state === "exited" || state === "dead") {
     return exitCode === 0 ? "ready" : "failed";
   }
   if (health === "unhealthy") return "failed";
   if (state === "running") {
+    // A one-shot job (the data importer) is done when it exits, not while it runs
+    if (oneshot) return "pending";
     return !health || health === "healthy" ? "ready" : "pending";
   }
   return "pending"; // created, restarting, paused...
@@ -91,15 +105,29 @@ export class Compose {
     return [...this.prefix, ...project, ...rest];
   }
 
+  /**
+   * Builds (reusing the layer cache) and starts the stack. BuildKit is asked for
+   * explicitly: the generated Dockerfiles use cache mounts (npm, gradle), which the
+   * legacy `docker-compose` binary only honours with these two variables.
+   */
   up(opts = {}) {
-    return this._exec(
-      this._argv(["up", "-d", "--build", "--remove-orphans"]),
-      opts,
-    );
+    return this._exec(this._argv(["up", "-d", "--build", "--remove-orphans"]), {
+      ...opts,
+      env: { ...BUILDKIT_ENV, ...opts.env },
+    });
   }
 
-  down(opts = {}) {
-    return this._exec(this._argv(["down", "-v", "--remove-orphans"]), opts);
+  /**
+   * Stops and removes the containers. The named volumes (the database...) are kept
+   * unless `volumes` is set: a redeploy then finds its data where it left it.
+   * @param {Object} [opts]
+   * @param {Boolean} [opts.volumes] Also delete the volumes (`down -v`)
+   */
+  down({ volumes = false, ...opts } = {}) {
+    return this._exec(
+      this._argv(["down", ...(volumes ? ["-v"] : []), "--remove-orphans"]),
+      opts,
+    );
   }
 
   async ps() {
