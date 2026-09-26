@@ -26,6 +26,10 @@ const STORED_EXTENSIONS = new Set([
   ".woff2",
 ]);
 
+/** Scripts the builds run directly: they must stay executable on the target. */
+export const isScript = (relative) =>
+  path.basename(relative) === "gradlew" || relative.endsWith(".sh");
+
 const compressionFor = (relative) =>
   STORED_EXTENSIONS.has(path.extname(relative).toLowerCase())
     ? "STORE"
@@ -95,23 +99,45 @@ export const hashFolder = async (srcDir, opts = {}) => {
  * @param {Object} [opts]
  * @param {String[]} [opts.excludes]
  * @param {String[]} [opts.files] Only these files (relative, posix) instead of the whole folder
+ * @param {String} [opts.prefix] Put everything below this folder inside the zip
+ * @param {Record<string, string|Buffer>} [opts.extraFiles] Files that are not on disk (relative path -> content)
+ * @param {(relative: String) => Boolean} [opts.isExecutable] Files that keep the executable bit
+ *   (a zip made on Windows has no permissions: scripts would not run after unzipping on Linux)
  * @returns {Promise<{files: Number, bytes: Number}>}
  */
 export const compressFolder = async (srcDir, destFile, opts = {}) => {
   const { excludes = DEFAULT_EXCLUDES } = opts;
   const files = opts.files || (await listFiles(srcDir, excludes));
 
+  const { prefix = "", extraFiles = {}, isExecutable = () => false } = opts;
+  const inZip = (relative) => (prefix ? `${prefix}/${relative}` : relative);
+  const modeOf = (relative) => (isExecutable(relative) ? 0o755 : 0o644);
+
   const zip = new JSZip();
   for (const relative of files) {
-    zip.file(relative, fs.createReadStream(path.join(srcDir, relative)), {
+    zip.file(inZip(relative), fs.createReadStream(path.join(srcDir, relative)), {
       compression: compressionFor(relative),
+      unixPermissions: modeOf(relative),
+    });
+  }
+  for (const [relative, content] of Object.entries(extraFiles)) {
+    zip.file(inZip(relative), content, {
+      compression: "DEFLATE",
+      unixPermissions: modeOf(relative),
     });
   }
 
   await pipeline(
-    zip.generateNodeStream({ streamFiles: true, compression: "DEFLATE" }),
+    zip.generateNodeStream({
+      streamFiles: true,
+      compression: "DEFLATE",
+      platform: "UNIX",
+    }),
     fs.createWriteStream(destFile),
   );
 
-  return { files: files.length, bytes: (await fsp.stat(destFile)).size };
+  return {
+    files: files.length + Object.keys(extraFiles).length,
+    bytes: (await fsp.stat(destFile)).size,
+  };
 };

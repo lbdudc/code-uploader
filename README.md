@@ -55,8 +55,10 @@ console.log(`Deployed at ${url}`);
 | Strategy | Steps |
 | --- | --- |
 | `LocalUploadStrategy` | Check Docker, stop previous deployment, build & start services, wait for services |
-| `DebianUploadStrategy` | Package code, connect to server, prepare server (installs Docker if missing), stop previous deployment, upload code, build & start services, wait for services |
-| `AWSUploadStrategy` | *Create AWS instance* (skipped when `host` is given), then the same steps as SSH. Retries the first connection while the instance boots |
+| `PackageStrategy` | *Create the zip* (gispublisher's `--generate --zip`): zips `repoPath` under a folder of the zip (plus `extraFiles`, e.g. a README and start scripts) into `file`. Nothing is deployed; the result has `file` instead of a URL |
+| `DebianUploadStrategy` | *Check the domain* (only with `domain`), package code, connect to server, prepare server (installs Docker if missing), stop previous deployment, upload code, build & start services, wait for services |
+| `HetznerStrategy`, `DigitalOceanStrategy` | *Create the server* (finds it by `serverName`, else creates it with your public ssh key and a firewall for 22/80/443; skipped when `host` is given), then the same steps as SSH, as `root`. Config: `cloudToken`, `serverName`, `certRoute` (the private key; `<certRoute>.pub` is uploaded), optional `serverSize`, `serverRegion`, `serverImage`, and `publicKey` to give the key as text. Plain REST calls with `fetch` (injectable as `fetchFn` for tests). **Not tried against the real services**, only against a fake API and to see the real APIs refuse a wrong token |
+| `AWSUploadStrategy` | *Check the firewall* (only with `domain`: the security group must open 80 and 443), *Create AWS instance* (skipped when `host` is given), then the same steps as SSH. Retries the first connection while the instance boots |
 
 ### Configuration
 
@@ -67,6 +69,8 @@ console.log(`Deployed at ${url}`);
 | `resetData` | all | `true` deletes the previous deployment's volumes (`down -v`, i.e. the database) before starting. Default `false`: a redeploy keeps its data |
 | `url` | all | URL returned as the result (default `http://localhost` / `http://<host>`) |
 | `host`, `port`, `username`, `certRoute` | ssh, aws | SSH target and key |
+| `domain` | ssh, aws | The app is served over HTTPS at this name (by the stack's own HTTPS front). Adds a *Check the domain* step: the name must lead to the server, or the deploy stops before connecting (only a warning on a server the deployment has just created). The result URL is `https://<domain>` |
+| `file`, `name`, `extraFiles` | `PackageStrategy` | Where to write the zip, the folder inside it, and files that are not on disk (relative path to content) |
 | `remoteRepoPath` | ssh, aws | Absolute remote folder (validated: no `..`, spaces or quotes) |
 | `AWS_*` | aws | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_AMI_ID`, `AWS_INSTANCE_TYPE`, `AWS_INSTANCE_NAME`, `AWS_SECURITY_GROUP_ID`, `AWS_KEY_NAME`. `AWS_USERNAME`, `AWS_SSH_PRIVATE_KEY_PATH` and `REMOTE_REPO_PATH` are accepted as aliases of `username`, `certRoute` and `remoteRepoPath` |
 

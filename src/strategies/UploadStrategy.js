@@ -179,7 +179,18 @@ class UploadStrategy {
       }
     }
 
-    return { url: this.resolveUrl(normalized, state) };
+    return { url: this.resolveUrl(normalized, state), ...this.resultDetails(normalized, state) };
+  }
+
+  /**
+   * More to report than the URL (a package has a file, not a URL).
+   * @param {Object} config Normalized config
+   * @param {Object} state State shared by the steps
+   * @returns {Object}
+   */
+  // eslint-disable-next-line no-unused-vars
+  resultDetails(config, state) {
+    return {};
   }
 
   /**

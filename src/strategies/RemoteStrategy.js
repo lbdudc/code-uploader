@@ -1,14 +1,19 @@
 import os from "os";
+import dns from "dns";
 import fs from "fs";
 import path from "path";
 import UploadStrategy, { IMPORTER_SERVICE } from "./UploadStrategy.js";
 import { SSHClient } from "../ssh.js";
 import { assertRemoteConfig } from "../config.js";
-import { compressFolder, hashFolder } from "../utils/zipUtils.js";
+import { compressFolder, hashFolder, isScript } from "../utils/zipUtils.js";
 import { getAbsolutePath, shQuote, formatDuration } from "../utils/utils.js";
 import { Compose } from "../docker/compose.js";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** ssh exits 255 when it cannot connect or the connection drops: waiting polls try again this many times */
+const SSH_POLL_RETRIES = 5;
+const SSH_POLL_RETRY_MS = 5000;
 
 /** Exit sudo early with a readable message instead of hanging on a prompt. */
 const REQUIRE_SUDO = `sudo -n true 2>/dev/null || { echo "Passwordless sudo is required on the server to install Docker" >&2; exit 1; }`;
@@ -66,14 +71,20 @@ const isSafeRelativePath = (p) =>
  * Concrete strategies (Debian/Ubuntu, AWS) extend it.
  */
 class RemoteStrategy extends UploadStrategy {
-  constructor({ sshFactory, sleepFn = sleep } = {}) {
+  constructor({ sshFactory, sleepFn = sleep, lookupFn } = {}) {
     super();
     this._sshFactory = sshFactory || ((opts) => new SSHClient(opts));
     this._sleep = sleepFn;
+    // every address a name resolves to, as strings
+    this._lookup =
+      lookupFn ||
+      (async (name) =>
+        (await dns.promises.lookup(name, { all: true })).map((a) => a.address));
   }
 
   /** Steps that run before the ssh ones (e.g. creating an EC2 instance). */
-  preSteps() {
+  // eslint-disable-next-line no-unused-vars
+  preSteps(config) {
     return [];
   }
 
@@ -82,9 +93,18 @@ class RemoteStrategy extends UploadStrategy {
     return 0;
   }
 
-  plan() {
+  plan(config = {}) {
     return [
-      ...this.preSteps(),
+      ...this.preSteps(config),
+      ...(config.domain
+        ? [
+            {
+              id: "domain",
+              label: "Check the domain",
+              run: (ctx) => this._checkDomain(ctx),
+            },
+          ]
+        : []),
       {
         id: "connect",
         label: "Connect to server",
@@ -116,7 +136,46 @@ class RemoteStrategy extends UploadStrategy {
   }
 
   resolveUrl(config, state) {
-    return config.url || `http://${state.host || config.host}`;
+    if (config.url) return config.url;
+    // with a domain the app answers over HTTPS there (the stack's own HTTPS front)
+    if (config.domain) return `https://${config.domain}`;
+    return `http://${state.host || config.host}`;
+  }
+
+  /**
+   * The HTTPS certificate is issued only if the domain leads to this server, and a wrong
+   * domain would otherwise show up as a site that never answers after the whole build. On a
+   * server the deployment has just created the domain can't be right yet: that is only
+   * warned about (the certificate is issued as soon as the domain points at it).
+   */
+  async _checkDomain(ctx) {
+    const { domain } = ctx.config;
+    const host = ctx.state.host || ctx.config.host;
+    const addresses = async (name) => {
+      try {
+        return await this._lookup(name);
+      } catch {
+        return [];
+      }
+    };
+    const [domainIps, serverIps] = await Promise.all([
+      addresses(domain),
+      addresses(host),
+    ]);
+
+    if (domainIps.some((ip) => serverIps.includes(ip))) {
+      return { detail: `${domain} points to ${host}` };
+    }
+
+    const seen = domainIps.length
+      ? `${domain} points to ${domainIps.join(", ")}`
+      : `${domain} does not point anywhere yet`;
+    const message = `${seen}, not to the server (${serverIps.join(", ") || host}). Point the domain at the server so the HTTPS certificate can be issued.`;
+    if (ctx.state.created) {
+      ctx.log(`Warning: ${message}`);
+      return { detail: "the domain does not point at the new server yet" };
+    }
+    throw new Error(message);
   }
 
   _ssh(ctx) {
@@ -137,21 +196,37 @@ class RemoteStrategy extends UploadStrategy {
     return `${ctx.config.remoteRepoPath}/deploy`;
   }
 
-  /** exec function for Compose: runs argv on the server inside deploy/. */
-  _remoteExec(ctx) {
+  /**
+   * exec function for Compose: runs argv on the server inside deploy/.
+   * With `retryConnection`, a failed ssh connection (exit 255: the server or the network hiccuped)
+   * is tried again a few times. Only for commands that can safely run twice, such as the polls that
+   * wait for the stack: losing one of dozens of polls must not fail a deployment that worked.
+   */
+  _remoteExec(ctx, { retryConnection = false } = {}) {
     const ssh = this._ssh(ctx);
     const dir = this._deployDir(ctx);
-    return (argv, { env, ...opts } = {}) =>
-      ssh.exec(`cd ${shQuote(dir)} && ${withRemoteEnv(argv, env)}`, {
-        signal: ctx.signal,
-        ...opts,
-      });
+    return async (argv, { env, ...opts } = {}) => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await ssh.exec(`cd ${shQuote(dir)} && ${withRemoteEnv(argv, env)}`, {
+            signal: ctx.signal,
+            ...opts,
+          });
+        } catch (error) {
+          if (!retryConnection || error.code !== 255 || attempt >= SSH_POLL_RETRIES || ctx.signal?.aborted) {
+            throw error;
+          }
+          ctx.log(`Connection to the server lost, trying again (${attempt + 1}/${SSH_POLL_RETRIES})...`);
+          await this._sleep(SSH_POLL_RETRY_MS);
+        }
+      }
+    };
   }
 
   /** `projectName` is explicit: undefined means compose's default (folder name). */
-  _compose(ctx, projectName) {
+  _compose(ctx, projectName, { retryConnection = false } = {}) {
     return new Compose({
-      exec: this._remoteExec(ctx),
+      exec: this._remoteExec(ctx, { retryConnection }),
       prefix: ctx.state.prefix,
       projectName,
     });
@@ -201,7 +276,10 @@ class RemoteStrategy extends UploadStrategy {
       ctx.state.zipPath = zipPath;
       ctx.state.zipName = zipName;
       ctx.onCleanup(() => fs.rmSync(zipPath, { force: true }));
-      ({ bytes } = await compressFolder(source, zipPath, { files: changed }));
+      ({ bytes } = await compressFolder(source, zipPath, {
+        files: changed,
+        isExecutable: isScript,
+      }));
     }
 
     ctx.log(
@@ -343,7 +421,7 @@ class RemoteStrategy extends UploadStrategy {
   }
 
   async _waitImporter(ctx) {
-    await this._compose(ctx, ctx.config.projectName).waitForServices({
+    await this._compose(ctx, ctx.config.projectName, { retryConnection: true }).waitForServices({
       services: [IMPORTER_SERVICE],
       signal: ctx.signal,
       onStatus: (services) => ctx.emit({ type: "services", services }),
@@ -433,7 +511,7 @@ GP_MANIFEST_EOF`,
   }
 
   async _wait(ctx) {
-    await this._compose(ctx, ctx.config.projectName).waitForServices({
+    await this._compose(ctx, ctx.config.projectName, { retryConnection: true }).waitForServices({
       signal: ctx.signal,
       onStatus: (services) => ctx.emit({ type: "services", services }),
     });

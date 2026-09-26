@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.0
+
+### Added
+- `PackageStrategy`: zips the generated app (plus extra files such as a README and start scripts) instead of deploying it.
+- `domain` / `acmeEmail` / `internalCertificate` config: ssh and AWS deployments answer over HTTPS at a domain. The domain is checked against the server before anything is built (only a warning for a server created by the same run), and AWS checks that the security group opens ports 80 and 443.
+- ssh: a dropped connection while waiting for the stack is retried instead of failing the deploy.
+- `HetznerStrategy` and `DigitalOceanStrategy` (over a shared `CloudApiStrategy`): create a server through the provider's REST API (or reuse the one with the same `serverName`), with the user's ssh key and a firewall for ports 22, 80 and 443, wait until it has a public address, then deploy over ssh as `root` exactly like the SSH strategy. Untested against the real services (a payment method is needed): covered by tests against a fake API.
+
 
 ## 2.2.0
 
